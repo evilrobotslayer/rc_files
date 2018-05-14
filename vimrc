@@ -133,8 +133,8 @@ call plug#begin('~/.vim/bundle')                        " Change default plugin 
   Plug 'tpope/vim-rhubarb'
   Plug 'airblade/vim-gitgutter'
 
-  " Language Plugins "
-   """"""""""""""""""
+  " Language Specific Plugins "
+   """""""""""""""""""""""""""
   Plug 'chase/vim-ansible-yaml'
 
   " quickr-cscope "
@@ -155,6 +155,10 @@ call plug#begin('~/.vim/bundle')                        " Change default plugin 
    """"""""""""""""""""
   " https://github.com/stefandtw/quickfix-reflector.vim
   Plug 'stefandtw/quickfix-reflector.vim'
+
+  " Syntax Checking "
+   """""""""""""""""
+  " Plug 'vim-syntastic/syntastic'
 
   " YouCompleteMe - Code Completion "
    """""""""""""""""""""""""""""""""
@@ -278,14 +282,18 @@ nnoremap <silent> <C-q> :qa<CR>
 nnoremap <silent> <C-w> :wa<CR>
 
 " Copy selection to system clipboard in visual mode
-vnoremap <silent> <C-c> "+y
+"vnoremap <silent> <C-c> "+y
+vnoremap <silent> <C-y> "+y
 " Paste from system clipboard in visual mode
-vnoremap <silent> <C-v> "+p
+"vnoremap <silent> <C-v> "+p
+vnoremap <silent> <C-p> "+p
 
 " Copy line to system clipboard in normal mode
-nnoremap <silent> <C-c> "+yy
+"nnoremap <silent> <C-c> "+yy
+nnoremap <silent> <C-y> "+yy
 " Paste from system clipboard in normal mode
-nnoremap <silent> <C-v> "+p
+"nnoremap <silent> <C-v> "+p
+nnoremap <silent> <C-p> "+p
 
 " Global search & replace visually selected text
 " (Probably not reg exp safe -- TODO)

@@ -54,6 +54,7 @@ alias ll='ls $LS_OPTIONS -al --color=auto'
 alias ssh='ssh -X'
 alias upsmon="watch -n2 \"apcaccess | grep 'XONBATT\|TONBATT\|BCHARGE\|TIMELEFT\|LOADPCT\|LINEV'\""
 alias dd-stat='sudo kill -USR1 $(pgrep ^dd)'
+alias digl='dig +nocomments +nostats +nocmd'
 
 # Define some helpful functions
 # Watch `dd` stats
