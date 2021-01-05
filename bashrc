@@ -92,6 +92,7 @@ ls-new() {
 
 # Don't forget neofetch
 # https://github.com/dylanaraps/neofetch
+if [ -f /usr/bin/neofetch ]; then echo; neofetch; fi
 
 # Echo a funny saying at shell start
 #echo Bastard Sysadmin Excuse of the Day:
