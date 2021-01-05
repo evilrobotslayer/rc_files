@@ -15,23 +15,23 @@ esac
 #    fi
 #esac
 
-# don't put duplicate lines or lines starting with space in the history.
 # See bash(1) for more options
+# Don't put duplicate lines or lines starting with space in the history.
 HISTCONTROL=ignoreboth
 
-# append to the history file, don't overwrite it
+# Annotate the history lines with timestamps in .bash_history
+HISTTIMEFORMAT=""
+
+# Append to the history file, don't overwrite it
 shopt -s histappend
 
-# for setting history length see HISTSIZE and HISTFILESIZE in bash(1)
+# Setting history length see HISTSIZE and HISTFILESIZE in bash(1)
 HISTSIZE=5000
 HISTFILESIZE=10000
 
-# check the window size after each command and, if necessary,
+# Check the window size after each command and, if necessary,
 # update the values of LINES and COLUMNS.
 shopt -s checkwinsize
-
-# Wipe freerdp known_hosts file
-#echo > ~/.freerdp/known_hosts
 
 # Define a more useful default output for ps
 export PS_FORMAT=euser,ruser,pid,ppid,stat,wchan,nlwp,ni,pri,%cpu,%mem,rss,stime,tty,time,cmd
@@ -45,7 +45,7 @@ if [ -f ~/.vim/bundle/vimpager/vimpager ]; then
     alias vless=~/.vim/bundle/vimpager/vimpager
     alias vcat=~/.vim/bundle/vimpager/vimcat
 else
-    export PAGER=`less`
+    export PAGER='less'
 fi
 
 # Configure some aliases
