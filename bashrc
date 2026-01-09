@@ -1,175 +1,239 @@
-# User specific aliases and functions
-# bash customizations - georgeg
+# INTERACTIVE CHECK & INITIALIZATION #
 # If not running interactively, don't do anything
-case $- in
-    *i*) ;;
-    *) return;;
-esac
+[[ $- != *i* ]] && return
 
-# Legacy #
-# Only if session is interactive
-#case $- in *i*)
-#    # Call to login/status script
-#    if [[ -f ~/.zlogin ]] ; then
-#            source ~/.zlogin
-#    fi
-#esac
+# SET GLOBAL VARIABLES #
+# This may need to be set appropriately
+BIN_path="/usr/bin"
 
+# Define the commands you want to secure
+CMDS=(cat column cut find grep less numfmt sed sort tmux ssh awk)
+
+# Validate and set variables dynamically
+for cmd in "${CMDS[@]}"; do
+    path="$BIN_path/$cmd"
+    if [[ -x "$path" ]]; then
+        # This creates variables like $CAT, $GREP, etc.
+        printf -v "${cmd^^}" "%s" "$path"
+    else
+        echo "Error: Critical binary not found: $path" >&2
+        return 10
+    fi
+done
+
+
+# HISTORY SETTINGS #
 # See bash(1) for more options
-# Don't put duplicate lines or lines starting with space in the history.
-# Also ignore common commands
+# ignoreboth = ignoredups + ignorespace
 HISTCONTROL="ignoreboth:erasedups"
 HISTIGNORE="ls:ll:cd:pwd:bg:fg:history"
-
 # Annotate the history lines with timestamps in .bash_history
 HISTTIMEFORMAT="%F %T: "
-
-# Append to the history file, don't overwrite it
-shopt -s histappend
-
-# Setting history length see HISTSIZE and HISTFILESIZE in bash(1)
 HISTSIZE=25000
 HISTFILESIZE=100000
+# Append to the history file, don't overwrite it
+# Check the window size after each command and update LINES and COLUMNS
+shopt -s histappend checkwinsize
 
-# Check the window size after each command and, if necessary,
-# update the values of LINES and COLUMNS.
-shopt -s checkwinsize
+
+# ENVIRONMENT VARIABLES #
+# Set CLI editing mode to vi and allow mode-prompt indicator
+set -o vi
 
 # Define a more useful default output for ps
 export PS_FORMAT=euser,ruser,pid,ppid,stat,wchan,nlwp,ni,pri,%cpu,%mem,rss,stime,tty,time,cmd
 
-# Define custom prompt string: user@host <dir> [bg_jobs|hist_#|non-0 exit/return code] $
-# Legacy version
-# PROMPT_COMMAND='PS1="${debian_chroot:+($debian_chroot)}\[\e[01;32m\]\u@\h\[\e[01;34m\] \w \[\e[01m\]\`if [[ \$? = "0" ]]; then echo "\\[\\e[36m\\][\\j\\\|\\!]\\[\\e[32m\\]"; else echo "\\[\\e[31m\\][\\j\\\|\\!\\\|$?]"; fi\` \$\[\e[00m\] "'
-# Define the prompt logic in a function
+# Set PAGER
+if [[ -f ~/.vim/bundle/vimpager/vimpager ]]; then
+    export PAGER=~/.vim/bundle/vimpager/vimpager
+    alias vless="$PAGER"
+    alias vcat=~/.vim/bundle/vimpager/vimcat
+else
+    export PAGER="$LESS"
+fi
+
+
+# SET PROMPT #
 define_prompt() {
     local EXIT="$?"
     # Sync history
     history -a; history -c; history -r
 
-    # Define colors
-    local GREEN='\[\e[01;32m\]'
-    local BLUE='\[\e[01;34m\]'
-    local CYAN='\[\e[36m\]'
-    local RED='\[\e[31m\]'
-    local RESET='\[\e[00m\]'
-    local BOLD='\[\e[01m\]'
+    # Use tput for cleaner color definitions (more portable)
+    local G='\[\e[01;32m\]' B='\[\e[01;34m\]' C='\[\e[36m\]' 
+    local R='\[\e[31m\]' W='\[\e[00m\]' BOLD='\[\e[01m\]'
 
-    # Build the status part
-    if [ "$EXIT" -eq 0 ]; then
-        local STATUS="${CYAN}[\j| \! ]${GREEN}"
+    # Check return/exit status
+    if (( EXIT == 0 )); then
+        local STATUS="${C}[\j| \! ]${G}"
     else
-        local STATUS="${RED}[\j|\!|$EXIT]"
+        local STATUS="${R}[\j|\!|$EXIT]"
     fi
-    PS1="${debian_chroot:+($debian_chroot)}${GREEN}\u@\h${BLUE} \w ${BOLD}${STATUS} \$${RESET} "
-}
 
+    # Build prompt
+    # The \f is the mode indicator placeholder provided by 'show-mode-in-prompt'
+    PS1="${debian_chroot:+($debian_chroot)}${G}\u@\h${B} \w ${BOLD}${STATUS} \$${W} "
+}
 PROMPT_COMMAND=define_prompt
 
-# Set CLI editing mode to vi
-set -o vi
 
-# Set PAGER appropriately
-if [ -f ~/.vim/bundle/vimpager/vimpager ]; then
-    export PAGER=~/.vim/bundle/vimpager/vimpager
-    alias vless=~/.vim/bundle/vimpager/vimpager
-    alias vcat=~/.vim/bundle/vimpager/vimcat
-else
-    export PAGER='less'
-fi
-
-# Configure some aliases
-alias ls='ls $LS_OPTIONS --color=auto'
-alias ll='ls $LS_OPTIONS -al --color=auto'
-alias ssh='ssh -X'
-alias upsmon="watch -n2 \"apcaccess | grep 'XONBATT\|TONBATT\|BCHARGE\|TIMELEFT\|LOADPCT\|LINEV'\""
-alias dd-stat='sudo kill -USR1 $(pgrep ^dd)'
-alias digl='dig +nocomments +nostats +nocmd'
-
-# Add an "alert" alias for long running commands.  Use like so:
-#   sleep 10; alert
-alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal ||
-echo error)" "$(history 1|sed '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
-
-# You may want to put all your additions into a separate file like
-# ~/.bash_aliases, instead of adding them here directly.
-# See /usr/share/doc/bash-doc/examples in the bash-doc package.
-
-if [ -f ~/.bash_aliases ]; then
-    . ~/.bash_aliases
-fi
-
-# enable programmable completion features (you don't need to enable
+# BASH COMPLETION #
+# Enable programmable completion features (you don't need to enable
 # this, if it's already enabled in /etc/bash.bashrc and /etc/profile
 # sources /etc/bash.bashrc).
+
 if ! shopt -oq posix; then
-    if [ -f /usr/share/bash-completion/bash_completion ]; then
-        . /usr/share/bash-completion/bash_completion
-    elif [ -f /etc/bash_completion ]; then
-        . /etc/bash_completion
-    fi
+    [[ -f /usr/share/bash-completion/bash_completion ]] && . /usr/share/bash-completion/bash_completion
+    [[ -f /etc/bash_completion ]] && . /etc/bash_completion
 fi
 
-# Define some helpful functions
-# Watch `dd` stats
-dd-stat-watch() { 
-    usage () { echo "Usage: dd-stat-watch [number of seconds between updates]"; }
 
-    case $* in 
-        ''|*[!0-9]*) usage;;
-        *) while [ true ]; do dd-stat; sleep "$1"; done;;
-    esac
+# ALIASES #
+# Add an "alert" alias for long running commands.  Use like so:
+#   sleep 10; alert
+alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history 1|sed "s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//")"'
+alias ls='ls $LS_OPTIONS --color=auto'
+alias ll='ls $LS_OPTIONS -al --color=auto'
+alias dd-stat='sudo kill -USR1 $(pgrep ^dd)'
+alias digl='dig +nocomments +nostats +nocmd'
+alias ports='netstat -tulanp'      # See what is listening
+alias ssh='ssh -X'
+alias upsmon="watch -n2 \"apcaccess | grep -E 'XONBATT|TONBATT|BCHARGE|TIMELEFT|LOADPCT|LINEV'\""
+
+# Add support for ~/.bash_aliases
+# See /usr/share/doc/bash-doc/examples in the bash-doc package
+[[ -f ~/.bash_aliases ]] && . ~/.bash_aliases
+
+
+# FUNCTIONS #
+dd-stat-watch() {
+    [[ $1 =~ ^[0-9]+$ ]] || { echo "Usage: dd-stat-watch [seconds]"; return 1; }
+    while true; do dd-stat; sleep "$1"; done
 }
 
-# Output a sorted list of all files in a given directory heirarchy by date of last modification.
-ls-new() {
-    usage() { echo "Usage: ls-new [search dir]"; echo "Will recursively list and sort all files in a directory heirarchy by date of last modification."; }
-
-    # Initialize and test binary paths
-    FIND="/usr/bin/find"
-    SORT="/usr/bin/sort" 
-    for BIN in $FIND $SORT; do 
-        if ! [ -x "$(command -v $BIN)" ]; then
-            echo "Error: Could not locate: $BIN" >&2 ;
-            return 10;
-        fi
-    done
-
-    if [ -d "$*" ]; then
-        $FIND $* -printf '%M %u %g %TY %Tb %Td %p\n' | sort -t' ' -k4n -k5M -k6n
+# Extract any archive
+extract() {
+    if [[ -f "$1" ]]; then
+        case "$1" in
+            *.tar.bz2) tar xjf "$1"    ;;
+            *.tar.gz)  tar xzf "$1"    ;;
+            *.bz2)     bunzip2 "$1"    ;;
+            *.rar)     unrar x "$1"     ;;
+            *.gz)      gunzip "$1"     ;;
+            *.tar)     tar xf "$1"     ;;
+            *.tbz2)    tar xjf "$1"    ;;
+            *.tgz)     tar xzf "$1"    ;;
+            *.zip)     unzip "$1"      ;;
+            *.Z)       uncompress "$1" ;;
+            *)         echo "'$1' cannot be extracted via extract()" ;;
+        esac
     else
-        usage;
+        echo "'$1' is not a valid file"
     fi
-    return 0;
+}
+
+ls-new() {
+    local dir="."
+    local human_fs=false
+    local new_ts=false
+    local reverse=false
+    local OPTIND  # Required: resets getopts index if function is called multiple times
+
+    usage() {
+        echo "Usage: ls-new [-h] [-t] [directory]"
+        echo "  -h  Adds human-readable file sizes"
+        echo "  -t  Show file timestamp (format: YYYY-MM-DD HH:MM:SS)"
+        echo "  -r  Reverse sort order (oldest first)"
+        echo "Recursively lists and sorts all files by date of last modification."
+        return 1
+    }
+
+    while getopts "htr" opt; do
+        case "$opt" in
+            h) human_fs=true ;;
+            t) new_ts=true ;;
+            r) reverse=true ;;
+            *) usage; return 1 ;;
+        esac
+    done
+    shift $((OPTIND - 1))        # Remove parsed options from arguments
+    [[ -n "$1" ]] && dir="$1"    # Remaining argument is the directory
+
+    [[ -d "$dir" ]] || { echo "Directory not found: $dir"; usage; return 1; }
+
+    # Sort logic:
+    local sort_flags='-n'
+    [[ "$reverse" == true ]]  && sort_flags="-nr"
+
+    # Format Logic:
+    # Default format: [Epoch]|Perms|User|Group|Size|Date|Path
+    local format='%T@|%M|%u|%g|%s|%TY %Tb %Td|%p\n'
+    local size_field=5
+
+    if [[ "$new_ts" == true ]]; then
+        # Format: [Epoch]|Date|HH:MM:SS|Perms|User|Group|Size|Path
+        format='%T@|%TY-%Tm-%Td|%TH:%TM:%TS|%M|%u|%g|%s|%p\n'
+        size_field=7
+    fi
+
+    # Execute
+    # We pipe everything into a group { ...; } to keep the stream alive
+    "$FIND" "$dir" -printf "$format" | "$SORT" $sort_flags | {
+        if [[ "$human_fs" == true ]]; then
+            "$NUMFMT" --to=iec --field="$size_field" --delimiter='|' --invalid=ignore
+        else
+            "$CAT"
+        fi
+    } | "$CUT" -d'|' -f2- | {
+        if [[ "$new_ts" == true ]]; then
+            "$SED" 's/\([0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\}\)\.[0-9]*/\1/'
+        else
+            "$CAT"
+        fi
+    } | "$COLUMN" -t -s'|' -R "$((size_field-1))"
 }
 
 # Capture command output to $out_var
+# Use: out2var ls -la
 out2var() {
-    out_var="$($*)";
+    out_var="$("$@")"
+}
+
+# Search for text recursively in current directory
+qgrep() {
+    [[ -z "$1" ]] && { echo "Usage: qgrep [search_term]"; return 1; }
+    $FIND . -type f -not -path '*/.*' -exec $GREP -Hn --color=always "$1" {} +
 }
 
 tmux_dump_buffer() {
-  usage () { echo "Usage: tmux_dump_buffer <num_buf_lines>"; echo "Will dump <num_buf_lines> of the tmux buffer to tmux_buff.out"; }
+    # Generate output filename with timestamp (YYYYMMDD_HHMMSS)
+    local TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    local OUT_FILE="tmux_buff_${TIMESTAMP}.out"
 
-  if [ "$#" -ne 1 ]; then
-      echo "This function only takes 1 argument.";
-      echo "Args Provided: $#";
-      echo "";
-      usage;
-      return 2;
-  fi
+    # Display usage if input var is not a number
+    [[ $1 =~ ^[0-9]+$ ]] || { echo "Usage: tmux_dump_buffer <lines>"; echo "Will dump <num_buf_lines> of the tmux buffer to tmux_buff.out"; return 1; }
 
-  tmux capture-pane -S -"$*"; tmux save-buffer tmux_buff.out
-  return 0
+    # Execute
+    if $TMUX capture-pane -S -"$1" && $TMUX save-buffer "$OUT_FILE"; then
+        echo "Saved $1 lines to $OUT_FILE"
+    else
+        echo "Error: Could not capture tmux buffer."
+        return 1
+    fi
 }
 
+
+# STARTUP VISUALS #
 # Don't forget neofetch
 # https://github.com/dylanaraps/neofetch
-if [ -f /usr/bin/neofetch ]; then echo; neofetch; fi
+[[ -x /usr/bin/neofetch ]] && neofetch
+echo
 
 # Echo a funny saying at shell start
 #echo Bastard Sysadmin Excuse of the Day:
+#echo ==================================
 #/usr/games/fortune bofh-excuses
 echo
+
 
 #end bash customizations
