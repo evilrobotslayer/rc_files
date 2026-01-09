@@ -8,7 +8,7 @@ BIN_SEARCH_PATHS=("/usr/bin" "/bin" "/usr/local/bin")
 
 # Define the commands you want to secure
 # Core binaries
-CMDS=(cat column cut df date find grep gunzip less notify-send numfmt sed sort ssh sudo tar tail unzip uname uptime xargs)
+CMDS=(cat column cut date df du find grep gunzip ip less notify-send numfmt sed sort ssh sudo tar tail unzip uname uptime xargs)
 # Validate and set variables dynamically
 for cmd in "${CMDS[@]}"; do
     found=false
@@ -28,7 +28,7 @@ for cmd in "${CMDS[@]}"; do
 done
 
 # Optional binaries
-OPTIONAL_CMDS=(7z awk bunzip2 dig lsof netstat pgrep ss tmux unrar uncompress)
+OPTIONAL_CMDS=(7z awk bunzip2 curl dig lsof md5sum mtr netstat pgrep resolvectl sha256sum ss systemctl tmux traceroute unrar uncompress)
 for cmd in "${OPTIONAL_CMDS[@]}"; do
     for path in "${BIN_SEARCH_PATHS[@]}"; do
         # Use ${cmd//-/_} to ensure variable names are valid (e.g., replace hyphens)
@@ -161,6 +161,33 @@ dd-stat-watch() {
     while true; do dd-stat; sleep "$1"; done
 }
 
+du-top() {
+    local dir="."
+    local count=10
+    local OPTIND
+
+    usage() {
+        echo "Usage: du-top [-n count] [directory]"
+        echo "  -n  Number of entries to display (default: 10)"
+        return 1
+    }
+
+    while getopts "n:h" opt; do
+        case "$opt" in
+            n) count="$OPTARG" ;;
+            *) usage; return 1 ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+    [[ -n "$1" ]] && dir="$1"
+
+    [[ -d "$dir" ]] || { echo "Directory not found: $dir"; return 1; }
+    [[ "$count" =~ ^[0-9]+$ ]] || count=10
+
+    echo -e "\e[1;34m--- Top $count Directories in $dir ---\e[0m"
+    "$_DU" -hd 1 "$dir" 2>/dev/null | "$_SORT" -hr | "$_SED" "$((count + 1))q" | "$_COLUMN" -t
+}
+
 # Extract any archive
 extract() {
     local file="$1"
@@ -208,6 +235,39 @@ find-new() {
     $_FIND . $depth_arg -type f -mmin -"$mins" -not -path '*/.*' -printf '%TY-%Tm-%Td | %TH:%TM:%TS | %M | %u | %g | %s | %p\n' | \
         $_SED 's/\.[0-9]* |/ |/g' | \
         $_COLUMN -t -s'|'
+}
+
+hash-check() {
+    local file="$1"
+    local compare_hash="$2"
+    [[ -f "$file" ]] || { echo "Usage: hash-check [file] [optional_hash_to_compare]"; return 1; }
+
+    local actual_sha=$($_SHA256SUM "$file" | "$_CUT" -d' ' -f1)
+    local actual_md5=$($_MD5SUM "$file" | "$_CUT" -d' ' -f1)
+
+    echo -e "\e[1;32mmd5:\e[0m    $actual_md5"
+    echo -e "\e[1;32msha256:\e[0m $actual_sha"
+
+    if [[ -n "$compare_hash" ]]; then
+        if [[ "$actual_sha" == "$compare_hash" ]]; then
+            echo -e "\e[1;32m[sha256 CONFIRMED]\e[0m"
+        elif [[ "$actual_md5" == "$compare_hash" ]]; then
+            echo -e "\e[1;32m[md5 CONFIRMED]\e[0m"
+        else
+            echo -e "\e[1;31m[HASH MISMATCH]\e[0m"
+            return 1
+        fi
+    fi
+}
+
+log-watch() {
+    local log_file="${1:-/var/log/syslog}"
+    [[ -f "$log_file" ]] || { echo "Error: Log file $log_file not found."; return 1; }
+
+    echo -e "\e[1;34m--- Watching $log_file [Ctrl+C to exit] ---\e[0m"
+
+    # Highlight keywords: ERROR, FATAL, FAIL, CRITICAL, DENIED
+    "$_TAIL" -f "$log_file" | "$_GREP" --color=always -Ei 'error|fatal|fail|critical|denied|warn|panic'
 }
 
 ls-new() {
@@ -269,6 +329,53 @@ ls-new() {
             "$_CAT"
         fi
     } | "$_COLUMN" -t -s'|' -R "$((size_field-1))"
+}
+
+net-audit() {
+    echo -e "\e[1;34m--- Network Audit ---\e[0m"
+
+    # External
+    if [[ -n "$_CURL" ]]; then
+        echo -ne "\e[1;32mExternal IP:\e[0m "
+        "$_CURL" -s https://ifconfig.me && echo
+    fi
+
+    # Internal / Gateway / DNS
+    echo -ne "\e[1;32mLocal Interfaces:\e[0m "
+    # Filters out loopback and non-ip lines
+    $_IP -4 addr show | "$_GREP" -oP '(?<=inet\s)\d+(\.\d+){3}' | "$_GREP" -v '127.0.0.1'
+
+    echo -ne "\e[1;32mDefault Gateway:\e[0m "
+    if [[ -f /proc/net/route ]]; then
+        local gw_hex=$("$_AWK" '$2 == "00000000" {print $3}' /proc/net/route | head -n1)
+        if [[ -n "$gw_hex" ]]; then
+            printf "%d.%d.%d.%d\n" 0x${gw_hex:6:2} 0x${gw_hex:4:2} 0x${gw_hex:2:2} 0x${gw_hex:0:2}
+        else
+            echo "None"
+        fi
+    else
+        $_IP route | "$_GREP" default | "$_AWK" '{print $3}'
+    fi
+
+    echo -e "\e[1;32mDNS Resolvers:\e[0m "
+    if [[ -f $_RESOLVECTL ]]; then
+        $_RESOLVECTL status | "$_GREP" "DNS Servers"
+    else
+        "$_CAT" /etc/resolv.conf | "$_GREP" nameserver
+    fi
+}
+
+net-trace() {
+    local target="$1"
+    [[ -z "$target" ]] && { echo "Usage: net-trace [host]"; return 1; }
+
+    if [[ -n "$_MTR" ]]; then
+        "$_MTR" -rw "$target"  # Report mode, wide output
+    elif [[ -n "$_TRACEROUTE" ]]; then
+        "$_TRACEROUTE" "$target"
+    else
+        echo "Error: mtr or traceroute not found." >&2
+    fi
 }
 
 # Capture command output to $out_var
