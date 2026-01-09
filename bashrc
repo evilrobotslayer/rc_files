@@ -7,7 +7,7 @@
 BIN_path="/usr/bin"
 
 # Define the commands you want to secure
-CMDS=(cat column cut find grep less numfmt sed sort tmux ssh awk gunzip unzip tar)
+CMDS=(cat column cut find grep less numfmt sed sort tmux ssh awk gunzip unzip tar xargs)
 
 # Validate and set variables dynamically
 for cmd in "${CMDS[@]}"; do
@@ -132,6 +132,29 @@ extract() {
     fi
 }
 
+# Find files modified in the last N minutes with optional depth
+# Usage: find-new [minutes] [optional_depth]
+find-new() {
+    local mins="$1"
+    local depth="$2"
+    local depth_arg=""
+
+    [[ $mins =~ ^[0-9]+$ ]] || { echo "Usage: find-new [minutes] [optional_depth]"; return 1; }
+
+    if [[ -n "$depth" ]]; then
+        [[ "$depth" =~ ^[0-9]+$ ]] || { echo "Error: Depth must be a number."; return 1; }
+        depth_arg="-maxdepth $depth"
+    fi
+
+    echo "Searching for files modified in the last $mins minutes..."
+    
+    # We reuse your ls-new logic for the output format
+    # Note: We use -mmin -$mins to find files modified LESS than N minutes ago
+    $FIND . $depth_arg -type f -mmin -"$mins" -not -path '*/.*' -printf '%TY-%Tm-%Td | %TH:%TM:%TS | %M | %u | %g | %s | %p\n' | \
+        $SED 's/\.[0-9]* |/ |/g' | \
+        $COLUMN -t -s'|'
+}
+
 ls-new() {
     local dir="."
     local human_fs=false
@@ -200,26 +223,21 @@ out2var() {
 }
 
 # Search for text recursively in current directory with optional depth
-# Usage: qgrep [search_term] [max_depth]
+# Usage: qgrep [search_term] [optional_depth]
 qgrep() {
     local term="$1"
     local depth="$2"
-
-    [[ -z "$term" ]] && { echo "Usage: qgrep [search_term] [optional_depth]"; return 1; }
-
-    # If a depth is provided, build the depth argument
     local depth_arg=""
+
+    [[ -z "$term" ]] && { echo "Usage: qgrep [search_term] [max_depth]"; return 1; }
+
+    # Validate and set depth if provided
     if [[ -n "$depth" ]]; then
-        if [[ "$depth" =~ ^[0-9]+$ ]]; then
-            depth_arg="-maxdepth $depth"
-        else
-            echo "Error: Depth must be a number."
-            return 1
-        fi
+        [[ "$depth" =~ ^[0-9]+$ ]] || { echo "Error: Depth must be a number."; return 1; }
+        depth_arg="-maxdepth $depth"
     fi
 
-    # Execute find with maxdepth (if set) and pipe to grep
-    # Using -print0 and xargs -0 to safely handle spaces in filenames
+    # Using -print0/xargs -0 to handle spaces/special characters in filenames safely
     $FIND . $depth_arg -type f -not -path '*/.*' -print0 | xargs -0 $GREP -Hn --color=always "$term"
 }
 
