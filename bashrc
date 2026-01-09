@@ -7,24 +7,39 @@
 BIN_SEARCH_PATHS=("/usr/bin" "/bin" "/usr/local/bin")
 
 # Define the commands you want to secure
-CMDS=(cat column cut find grep less numfmt sed sort tmux ssh awk gunzip unzip tar xargs)
-
+# Core binaries
+CMDS=(cat column cut df date find grep gunzip less notify-send numfmt sed sort ssh sudo tar tail unzip uname uptime xargs)
 # Validate and set variables dynamically
 for cmd in "${CMDS[@]}"; do
     found=false
     for path in "${BIN_SEARCH_PATHS[@]}"; do
+        # Use ${cmd//-/_} to ensure variable names are valid (e.g., replace hyphens)
+        var_name="_${cmd^^}"
+        var_name="${var_name//-/_}"
         if [[ -x "$path/$cmd" ]]; then
             # Create the uppercase variable (e.g., $GREP) with the first path found
-            printf -v "${cmd^^}" "%s" "$path/$cmd"
+            printf -v "$var_name" "%s" "$path/$cmd"
+            unset var_name
             found=true
             break # Stop searching once found
         fi
     done
+    [[ "$found" == false ]] && { echo "Error: Critical binary '$cmd' not found" >&2; return 10; }
+done
 
-    if [[ "$found" == false ]]; then
-        echo "Error: Critical binary '$cmd' not found in ${BIN_SEARCH_PATHS[*]}" >&2
-        return 10
-    fi
+# Optional binaries
+OPTIONAL_CMDS=(7z awk bunzip2 dig lsof netstat pgrep ss tmux unrar uncompress)
+for cmd in "${OPTIONAL_CMDS[@]}"; do
+    for path in "${BIN_SEARCH_PATHS[@]}"; do
+        # Use ${cmd//-/_} to ensure variable names are valid (e.g., replace hyphens)
+        var_name="_${cmd^^}"
+        var_name="${var_name//-/_}"
+        if [[ -x "$path/$cmd" ]]; then
+            printf -v "$var_name" "%s" "$path/$cmd"
+            unset var_name
+            break
+        fi
+    done
 done
 
 
@@ -66,7 +81,7 @@ define_prompt() {
     history -a; history -c; history -r
 
     # Use tput for cleaner color definitions (more portable)
-    local G='\[\e[01;32m\]' B='\[\e[01;34m\]' C='\[\e[36m\]' 
+    local G='\[\e[01;32m\]' B='\[\e[01;34m\]' C='\[\e[36m\]'
     local R='\[\e[31m\]' W='\[\e[00m\]' BOLD='\[\e[01m\]'
 
     # Check return/exit status
@@ -97,13 +112,13 @@ fi
 # ALIASES #
 # Add an "alert" alias for long running commands.  Use like so:
 #   sleep 10; alert
-alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history 1|sed "s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//")"'
+alias alert='$_NOTIFY_SEND --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history 1| $_SED "s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//")"'
 alias ls='ls $LS_OPTIONS --color=auto'
 alias ll='ls $LS_OPTIONS -al --color=auto'
-alias dd-stat='sudo kill -USR1 $(pgrep ^dd)'
-alias digl='dig +nocomments +nostats +nocmd'
-alias ports='netstat -tulanp'      # See what is listening
-alias ssh='ssh -X'
+alias dd-stat='kill -USR1 $($_PGREP ^dd)'
+alias digl='$_DIG +nocomments +nostats +nocmd'
+alias ports='$_NETSTAT -tulanp'      # See what is listening
+alias ssh='$_SSH -X'
 alias upsmon="watch -n2 \"apcaccess | grep -E 'XONBATT|TONBATT|BCHARGE|TIMELEFT|LOADPCT|LINEV'\""
 
 # Add support for ~/.bash_aliases
@@ -112,6 +127,35 @@ alias upsmon="watch -n2 \"apcaccess | grep -E 'XONBATT|TONBATT|BCHARGE|TIMELEFT|
 
 
 # FUNCTIONS #
+bin-audit() {
+    echo -e "\e[1;34m--- Environment Capability Audit ---\e[0m"
+
+    # Audit Core Binaries
+    echo -e "\e[1;32m[Core Utilities]\e[0m"
+    for cmd in "${CMDS[@]}"; do
+        var_name="_${cmd^^}"
+        var_name="${var_name//-/_}"
+        if [[ -n "${!var_name}" ]]; then
+            printf "  %-12s : \e[32m%s\e[0m\n" "$cmd" "${!var_name}"
+        else
+            printf "  %-12s : \e[31mNOT FOUND\e[0m\n" "$cmd"
+        fi
+    done
+
+    # Audit Optional Binaries
+    echo -e "\n\e[1;34m[Optional/Portable Utilities]\e[0m"
+    for cmd in "${OPTIONAL_CMDS[@]}"; do
+        var_name="_${cmd^^}"
+        var_name="${var_name//-/_}"
+        if [[ -n "${!var_name}" ]]; then
+            printf "  %-12s : \e[32m%s\e[0m\n" "$cmd" "${!var_name}"
+        else
+            printf "  %-12s : \e[33mNOT FOUND\e[0m\n" "$cmd"
+        fi
+    done
+    echo
+}
+
 dd-stat-watch() {
     [[ $1 =~ ^[0-9]+$ ]] || { echo "Usage: dd-stat-watch [seconds]"; return 1; }
     while true; do dd-stat; sleep "$1"; done
@@ -119,23 +163,30 @@ dd-stat-watch() {
 
 # Extract any archive
 extract() {
-    if [[ -f "$1" ]]; then
-        case "$1" in
-            *.tar.bz2) tar xjf "$1"    ;;
-            *.tar.gz)  tar xzf "$1"    ;;
-            *.bz2)     bunzip2 "$1"    ;;
-            *.rar)     unrar x "$1"     ;;
-            *.gz)      gunzip "$1"     ;;
-            *.tar)     tar xf "$1"     ;;
-            *.tbz2)    tar xjf "$1"    ;;
-            *.tgz)     tar xzf "$1"    ;;
-            *.zip)     unzip "$1"      ;;
-            *.Z)       uncompress "$1" ;;
-            *)         echo "'$1' cannot be extracted via extract()" ;;
-        esac
-    else
-        echo "'$1' is not a valid file"
-    fi
+    local file="$1"
+    [[ -f "$file" ]] || { echo "'$1' is not a valid file"; return 1; }
+
+    # Helper to check if optional tool exists
+    _check_tool() {
+        if [[ -z "$1" ]]; then
+            echo "Error: Required utility for this format is not installed/found." >&2
+            return 1
+        fi
+    }
+
+    case "$file" in
+        *.tar.bz2|*.tbz2) $_TAR xjf "$file"    ;;
+        *.tar.gz|*.tgz)   $_TAR xzf "$file"    ;;
+        *.tar.xz|*.txz)   $_TAR xJf "$file"    ;;
+        *.tar)            $_TAR xf "$file"     ;;
+        *.bz2)            _check_tool "$_BUNZIP2"    && $_BUNZIP2 "$file"    ;;
+        *.rar)            _check_tool "$_UNRAR"      && $_UNRAR x "$file"    ;;
+        *.gz)             $_GUNZIP "$file"     ;;
+        *.zip)            $_UNZIP "$file"      ;;
+        *.Z)              _check_tool "$_UNCOMPRESS" && $_UNCOMPRESS "$file" ;;
+        *.7z)             _check_tool "$_7Z"         && $_7Z x "$file"       ;;
+        *)                echo "ERROR: Unknown Format: '$file'"; return 1  ;;
+    esac
 }
 
 # Find files modified in the last N minutes with optional depth
@@ -153,12 +204,10 @@ find-new() {
     fi
 
     echo "Searching for files modified in the last $mins minutes..."
-    
-    # We reuse your ls-new logic for the output format
-    # Note: We use -mmin -$mins to find files modified LESS than N minutes ago
-    $FIND . $depth_arg -type f -mmin -"$mins" -not -path '*/.*' -printf '%TY-%Tm-%Td | %TH:%TM:%TS | %M | %u | %g | %s | %p\n' | \
-        $SED 's/\.[0-9]* |/ |/g' | \
-        $COLUMN -t -s'|'
+
+    $_FIND . $depth_arg -type f -mmin -"$mins" -not -path '*/.*' -printf '%TY-%Tm-%Td | %TH:%TM:%TS | %M | %u | %g | %s | %p\n' | \
+        $_SED 's/\.[0-9]* |/ |/g' | \
+        $_COLUMN -t -s'|'
 }
 
 ls-new() {
@@ -207,25 +256,36 @@ ls-new() {
 
     # Execute
     # We pipe everything into a group { ...; } to keep the stream alive
-    "$FIND" "$dir" -printf "$format" | "$SORT" $sort_flags | {
+    "$_FIND" "$dir" -printf "$format" | "$_SORT" $sort_flags | {
         if [[ "$human_fs" == true ]]; then
-            "$NUMFMT" --to=iec --field="$size_field" --delimiter='|' --invalid=ignore
+            "$_NUMFMT" --to=iec --field="$size_field" --delimiter='|' --invalid=ignore
         else
-            "$CAT"
+            "$_CAT"
         fi
-    } | "$CUT" -d'|' -f2- | {
+    } | "$_CUT" -d'|' -f2- | {
         if [[ "$new_ts" == true ]]; then
-            "$SED" 's/\([0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\}\)\.[0-9]*/\1/'
+            "$_SED" 's/\([0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\}\)\.[0-9]*/\1/'
         else
-            "$CAT"
+            "$_CAT"
         fi
-    } | "$COLUMN" -t -s'|' -R "$((size_field-1))"
+    } | "$_COLUMN" -t -s'|' -R "$((size_field-1))"
 }
 
 # Capture command output to $out_var
 # Use: out2var ls -la
 out2var() {
     out_var="$("$@")"
+}
+
+ports-ls() {
+    echo -e "\e[1;34m--- Listening Sockets (IPv4/IPv6) ---\e[0m"
+    if [[ -n "$_SS" ]]; then
+        "$_SUDO" "$_SS" -tulnp | "$_TAIL" -n +2 | "$_COLUMN" -t -N "Netid,State,Recv-Q,Send-Q,Local Address:Port,Peer Address:Port,Process"
+    elif [[ -n "$_LSOF" ]]; then
+        "$_SUDO" "$_LSOF" -i -P -n | "$_GREP" LISTEN
+    else
+        echo "Error: ss or lsof required." >&2
+    fi
 }
 
 # Search for text recursively in current directory with optional depth
@@ -244,27 +304,27 @@ qgrep() {
     fi
 
     # Using -print0/xargs -0 to handle spaces/special characters in filenames safely
-    $FIND . $depth_arg -type f -not -path '*/.*' -print0 | xargs -0 $GREP -Hn --color=always "$term"
+    $_FIND . $depth_arg -type f -not -path '*/.*' -print0 | $_XARGS -0 $_GREP -Hn --color=always "$term"
 }
 
 stats() {
     echo -e "\e[1;34m--- System Stats ---\e[0m"
-    echo -e "\e[1;32mOS:\e[0m $(uname -sr)"
-    echo -e "\e[1;32mUptime:\e[0m $(uptime -p)"
+    echo -e "\e[1;32mOS:\e[0m $($_UNAME -sr)"
+    echo -e "\e[1;32mUptime:\e[0m $($_UPTIME -p)"
     echo -e "\e[1;32mDisk Usage:\e[0m"
-    df -h | $SED -e '1p' -e '/^\/dev\//!d' | $COLUMN -t
+    $_DF -h | $_SED -e '/^\/dev\//!d' | $_COLUMN -t -N "Filesystem,Size,Used,Avail,Use%,Mounted on"
 }
 
 tmux_dump_buffer() {
     # Generate output filename with timestamp (YYYYMMDD_HHMMSS)
-    local TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    local TIMESTAMP=$($_DATE +%Y%m%d_%H%M%S)
     local OUT_FILE="tmux_buff_${TIMESTAMP}.out"
 
     # Display usage if input var is not a number
     [[ $1 =~ ^[0-9]+$ ]] || { echo "Usage: tmux_dump_buffer <lines>"; echo "Will dump <num_buf_lines> of the tmux buffer to tmux_buff.out"; return 1; }
 
     # Execute
-    if $TMUX capture-pane -S -"$1" && $TMUX save-buffer "$OUT_FILE"; then
+    if $_TMUX capture-pane -S -"$1" && $_TMUX save-buffer "$OUT_FILE"; then
         echo "Saved $1 lines to $OUT_FILE"
     else
         echo "Error: Could not capture tmux buffer."
@@ -276,13 +336,15 @@ tmux_dump_buffer() {
 # STARTUP VISUALS #
 # Don't forget neofetch
 # https://github.com/dylanaraps/neofetch
-[[ -x /usr/bin/neofetch ]] && neofetch
+[[ -x /usr/bin/neofetch ]] && /usr/bin/neofetch
 echo
 
 # Echo a funny saying at shell start
-#echo Bastard Sysadmin Excuse of the Day:
-#echo ==================================
-#/usr/games/fortune bofh-excuses
+if [[ -x /usr/games/fortune ]]; then
+    echo Bastard Sysadmin Excuse of the Day:
+    echo ==================================
+    /usr/games/fortune bofh-excuses
+fi
 echo
 
 
