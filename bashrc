@@ -7,7 +7,7 @@
 BIN_path="/usr/bin"
 
 # Define the commands you want to secure
-CMDS=(cat column cut find grep less numfmt sed sort tmux ssh awk)
+CMDS=(cat column cut find grep less numfmt sed sort tmux ssh awk gunzip unzip tar)
 
 # Validate and set variables dynamically
 for cmd in "${CMDS[@]}"; do
@@ -199,10 +199,36 @@ out2var() {
     out_var="$("$@")"
 }
 
-# Search for text recursively in current directory
+# Search for text recursively in current directory with optional depth
+# Usage: qgrep [search_term] [max_depth]
 qgrep() {
-    [[ -z "$1" ]] && { echo "Usage: qgrep [search_term]"; return 1; }
-    $FIND . -type f -not -path '*/.*' -exec $GREP -Hn --color=always "$1" {} +
+    local term="$1"
+    local depth="$2"
+
+    [[ -z "$term" ]] && { echo "Usage: qgrep [search_term] [optional_depth]"; return 1; }
+
+    # If a depth is provided, build the depth argument
+    local depth_arg=""
+    if [[ -n "$depth" ]]; then
+        if [[ "$depth" =~ ^[0-9]+$ ]]; then
+            depth_arg="-maxdepth $depth"
+        else
+            echo "Error: Depth must be a number."
+            return 1
+        fi
+    fi
+
+    # Execute find with maxdepth (if set) and pipe to grep
+    # Using -print0 and xargs -0 to safely handle spaces in filenames
+    $FIND . $depth_arg -type f -not -path '*/.*' -print0 | xargs -0 $GREP -Hn --color=always "$term"
+}
+
+stats() {
+    echo -e "\e[1;34m--- System Stats ---\e[0m"
+    echo -e "\e[1;32mOS:\e[0m $(uname -sr)"
+    echo -e "\e[1;32mUptime:\e[0m $(uptime -p)"
+    echo -e "\e[1;32mDisk Usage:\e[0m"
+    df -h | $GREP '^/dev/' | $COLUMN -t
 }
 
 tmux_dump_buffer() {
