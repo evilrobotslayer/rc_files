@@ -70,7 +70,7 @@ if [[ -f ~/.vim/bundle/vimpager/vimpager ]]; then
     alias vless="$PAGER"
     alias vcat=~/.vim/bundle/vimpager/vimcat
 else
-    export PAGER="$LESS"
+    export PAGER="$_LESS"
 fi
 
 
