@@ -8,7 +8,7 @@ BIN_SEARCH_PATHS=("/usr/bin" "/bin" "/usr/local/bin")
 
 # Define the commands you want to secure
 # Core binaries
-CMDS=(cat column cut date df du find grep gunzip ip less notify-send numfmt sed sort ssh sudo tar tail unzip uname uptime xargs)
+CMDS=(cat column cut date df du find grep gunzip ip kill less notify-send numfmt sed sort ssh sudo tar tail unzip uname uptime watch xargs)
 # Validate and set variables dynamically
 for cmd in "${CMDS[@]}"; do
     found=false
@@ -19,6 +19,8 @@ for cmd in "${CMDS[@]}"; do
         if [[ -x "$path/$cmd" ]]; then
             # Create the uppercase variable (e.g., $GREP) with the first path found
             printf -v "$var_name" "%s" "$path/$cmd"
+            # Establish the alias to bypass $PATH lookup
+            alias "$cmd"="${!var_name}"
             unset var_name
             found=true
             break # Stop searching once found
@@ -36,6 +38,8 @@ for cmd in "${OPTIONAL_CMDS[@]}"; do
         var_name="${var_name//-/_}"
         if [[ -x "$path/$cmd" ]]; then
             printf -v "$var_name" "%s" "$path/$cmd"
+            # Establish the alias to bypass $PATH lookup
+            alias "$cmd"="${!var_name}"
             unset var_name
             break
         fi
@@ -115,11 +119,11 @@ fi
 alias alert='$_NOTIFY_SEND --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history 1| $_SED "s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//")"'
 alias ls='ls $LS_OPTIONS --color=auto'
 alias ll='ls $LS_OPTIONS -al --color=auto'
-alias dd-stat='kill -USR1 $($_PGREP ^dd)'
+alias dd-stat='$_KILL -USR1 $($_PGREP ^dd)'
 alias digl='$_DIG +nocomments +nostats +nocmd'
 alias ports='$_NETSTAT -tulanp'      # See what is listening
 alias ssh='$_SSH -X'
-alias upsmon="watch -n2 \"apcaccess | grep -E 'XONBATT|TONBATT|BCHARGE|TIMELEFT|LOADPCT|LINEV'\""
+alias upsmon="$_WATCH -n2 \"apcaccess | grep -E 'XONBATT|TONBATT|BCHARGE|TIMELEFT|LOADPCT|LINEV'\""
 
 # Add support for ~/.bash_aliases
 # See /usr/share/doc/bash-doc/examples in the bash-doc package
