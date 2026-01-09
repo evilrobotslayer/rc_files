@@ -252,7 +252,7 @@ stats() {
     echo -e "\e[1;32mOS:\e[0m $(uname -sr)"
     echo -e "\e[1;32mUptime:\e[0m $(uptime -p)"
     echo -e "\e[1;32mDisk Usage:\e[0m"
-    df -h | $GREP '^/dev/' | $COLUMN -t
+    df -h | $SED -e '1p' -e '/^\/dev\//!d' | $COLUMN -t
 }
 
 tmux_dump_buffer() {

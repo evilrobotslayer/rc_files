@@ -1,4 +1,4 @@
-"""""""""""""""""""       
+"""""""""""""""""""
 "  .vimrc Config  "
 " evilrobotslayer "
 """""""""""""""""""
@@ -25,10 +25,11 @@ set listchars=eol:$,tab:>-,trail:~,extends:>,precedes:<         " Assign charact
 " Custom Key Mappings "
  """""""""""""""""""""
 " These likely are highly dependent on your terminal
-set <S-F1>=O1;2P
-set <S-F2>=O1;2Q
-set <S-F3>=O1;2R
-set <S-F4>=O1;2S
+"set <S-F1>=O1;2P
+set <S-F1>=[1;2P
+set <S-F2>=[1;2Q
+set <S-F3>=[1;2R
+set <S-F4>=[1;2S
 
 " Disable Error Bells "
  """""""""""""""""""""
@@ -66,7 +67,8 @@ set splitright                   " Better handling of new splits
 " GUI Config "
  """"""""""""
 set mouse=a                                     " Enable mouse support for all modes
-set guifont=DroidSansMono\ Nerd\ Font\ 11       " Set Font - Nerd Fonts provides Powerline Icons
+"set guifont=DroidSansM\ Nerd\ Font\ 11         " Set Font - Nerd Fonts provides Powerline Icons
+set guifont=EnvyCodeR\ Nerd\ Font\ Mono\ 11     " Set Font - Nerd Fonts provides Powerline Icons
 " https://github.com/ryanoasis/nerd-fonts/tree/master/patched-fonts/DroidSansMono
 
 
