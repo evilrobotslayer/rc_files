@@ -2,21 +2,27 @@
 # If not running interactively, don't do anything
 [[ $- != *i* ]] && return
 
-# SET GLOBAL VARIABLES #
-# This may need to be set appropriately
-BIN_path="/usr/bin"
+# SET SECURE BIN PATHS #
+# Define the common binary search paths
+BIN_SEARCH_PATHS=("/usr/bin" "/bin" "/usr/local/bin")
 
 # Define the commands you want to secure
 CMDS=(cat column cut find grep less numfmt sed sort tmux ssh awk gunzip unzip tar xargs)
 
 # Validate and set variables dynamically
 for cmd in "${CMDS[@]}"; do
-    path="$BIN_path/$cmd"
-    if [[ -x "$path" ]]; then
-        # This creates variables like $CAT, $GREP, etc.
-        printf -v "${cmd^^}" "%s" "$path"
-    else
-        echo "Error: Critical binary not found: $path" >&2
+    found=false
+    for path in "${BIN_SEARCH_PATHS[@]}"; do
+        if [[ -x "$path/$cmd" ]]; then
+            # Create the uppercase variable (e.g., $GREP) with the first path found
+            printf -v "${cmd^^}" "%s" "$path/$cmd"
+            found=true
+            break # Stop searching once found
+        fi
+    done
+
+    if [[ "$found" == false ]]; then
+        echo "Error: Critical binary '$cmd' not found in ${BIN_SEARCH_PATHS[*]}" >&2
         return 10
     fi
 done
