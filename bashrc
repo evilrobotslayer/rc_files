@@ -353,11 +353,11 @@ io-audit() {
                     read -r _ last_t last_ri last_rs last_wi last_ws <<< "$last_data"
                     local t_diff=$((now - last_t))
                     if (( t_diff > 0 )); then
-                        # awk is used here only for floating point throughput calculation
-                        r_speed=$($_AWK -v n="$rsect_now" -v l="$last_rs" -v s="$s_size" -v t="$t_diff" 'BEGIN {printf "%.2f", ((n-l)*s/1024/t)}')
-                        w_speed=$($_AWK -v n="$wsect_now" -v l="$last_ws" -v s="$s_size" -v t="$t_diff" 'BEGIN {printf "%.2f", ((n-l)*s/1024/t)}')
-                        r_iops=$(((riops_now - last_ri) / t_diff))
-                        w_iops=$(((wiops_now - last_wi) / t_diff))
+                        # Pure Bash integer math for KB/s
+                        r_speed=$(( (riops_now - last_ri) * s_size / 1024 / t_diff ))
+                        w_speed=$(( (wiops_now - last_wi) * s_size / 1024 / t_diff ))
+                        r_iops=$(( (riops_now - last_ri) / t_diff ))
+                        w_iops=$(( (wiops_now - last_wi) / t_diff ))
                     fi
                 fi
             fi
@@ -723,7 +723,6 @@ stats() {
         if [[ -f /proc/pressure/cpu ]]; then
             echo -ne "${_CLR_B_GRN}PSI (avg10s): ${_CLR_NC}"
             $_AWK -v grn="${_AWK_B_GRN}" -v ylw="${_AWK_B_YLW}" -v red="${_AWK_B_RED}" -v nc="${_AWK_NC}" '
-                # Function to determine color based on type and value
                 function get_clr(type, val) {
                     if (type == "cpu_some") { if (val > 5.0) return red; if (val > 0.5) return ylw; return grn; }
                     if (type == "mem_some") { if (val > 10.0) return red; if (val > 1.0) return ylw; return grn; }
@@ -732,19 +731,19 @@ stats() {
                     if (type == "io_full")  { if (val > 5.0) return red; if (val > 1.0) return ylw; return grn; }
                     return grn;
                 }
-                # Extract avg10=X.XX
-                { split($2, a, "="); val=a[2]; }
-                FILENAME ~ /cpu/    { c_s=val; }
-                FILENAME ~ /memory/ && /some/ { m_s=val; }
-                FILENAME ~ /memory/ && /full/ { m_f=val; }
-                FILENAME ~ /io/     && /some/ { i_s=val; }
-                FILENAME ~ /io/     && /full/ { i_f=val; }
+                { 
+                    # Extract avg10=X.XX
+                    split($2, a, "="); val=a[2]; 
+                    if (FILENAME ~ /cpu/) { c_s=val }
+                    else if (FILENAME ~ /memory/) { if ($1 == "some") m_s=val; else m_f=val }
+                    else if (FILENAME ~ /io/) { if ($1 == "some") i_s=val; else i_f=val }
+                }
                 END {
                     printf "CPU: %s%s%s%% | ", get_clr("cpu_some", c_s), c_s, nc;
                     printf "MEM: %s%s%s%% (S) / %s%s%s%% (F) | ", get_clr("mem_some", m_s), m_s, nc, get_clr("mem_full", m_f), m_f, nc;
                     printf "IO: %s%s%s%% (S) / %s%s%s%% (F)\n", get_clr("io_some", i_s), i_s, nc, get_clr("io_full", i_f), i_f, nc;
                 }
-            ' /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io
+            ' /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io 
         fi
 
         # 3. Memory & Swap (Standardized Color Logic)
