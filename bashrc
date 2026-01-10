@@ -13,8 +13,8 @@ BIN_SEARCH_PATHS=("/usr/bin" "/bin" "/usr/local/bin")
 
 # Define the commands you want to secure
 # Combined List for initial path validation
-CMDS=(basename cat clear column cut date df dmesg du find grep gunzip head ip join kill ls less more notify-send numfmt ps readlink sed sleep sort ssh stat sudo tar tail tr unzip uname uptime watch xargs)
-OPTIONAL_CMDS=(7z awk bunzip2 curl dig lsof md5sum mtr netstat nmtui pgrep resolvectl sha256sum ss systemctl tmux traceroute unrar uncompress rm)
+CMDS=(basename cat clear column cut date df dmesg du find grep gunzip head ip join kill ls less more notify-send numfmt ps readlink rm sed sleep sort ssh stat sudo tar tail tr unzip uname uptime watch xargs)
+OPTIONAL_CMDS=(7z awk bunzip2 curl dig lsof md5sum mtr netstat nmtui pgrep resolvectl sha256sum ss systemctl tmux traceroute unrar uncompress)
 
 # Single pass to map binaries to variables and aliases
 for cmd in "${CMDS[@]}" "${OPTIONAL_CMDS[@]}"; do
@@ -509,7 +509,7 @@ mem-top() {
                 # Math and formatting performed within awk
                 printf "%s|%.1f%%|%.2f|MB|%s\n", k[1], (rss[i]/tot)*100, rss[i]/1024, k[2]
             }
-        }' | $_SORT -rn | $_HEAD -n "$count" | $_COLUMN -t -s'|' -N "USER,%MEM,RSS,UNIT,COMMAND" | $_SED 's/^/    /'
+        }' | $_SORT -t'|' -rn -k3 | $_HEAD -n "$count" | $_COLUMN -t -s'|' -N "USER,%MEM,RSS,UNIT,COMMAND" -R2,3 | $_SED 's/^/    /'
     }
     # Call looping function
     _loop_render "$interval" _render_mem
@@ -657,7 +657,7 @@ proc-top() {
                 # Output: User | CPU% | RSS(MB) | Command
                 printf "%s|%.1f%%|%.2f|MB|%s\n", k[1], cpu[i], rss[i]/1024, k[2]
             }
-        }' | $_SORT -rn -t'|' -k2 | $_HEAD -n "$count" | $_COLUMN -t -s'|' -N "USER,%CPU,RSS,UNIT,COMMAND" | $_SED 's/^/    /'
+        }' | $_SORT -rn -t'|' -k2 | $_HEAD -n "$count" | $_COLUMN -t -s'|' -N "USER,%CPU,RSS,UNIT,COMMAND" -R2,3 | $_SED 's/^/    /'
     }
     # Call looping function
     _loop_render "$interval" _render_proc
@@ -817,8 +817,8 @@ util-ls() {
 
 
 # COLLISION DETECTION #
-# Check for naming conflicts between utility functions and system binaries
 _check_collisions() {
+    : Check for naming conflicts between utility functions and system binaries
     local func_list
     func_list=$(declare -F | $_AWK '{print $3}' | $_GREP -vE '^(_|usage|quote|dequote|command_not_found)')
     for func in $func_list; do
