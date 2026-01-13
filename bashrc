@@ -13,7 +13,7 @@ BIN_SEARCH_PATHS=("/usr/bin" "/bin" "/usr/local/bin")
 
 # Define the commands you want to secure
 # Combined List for initial path validation
-CMDS=(basename cat clear column cut date df dmesg du find grep gunzip head ip join kill ls less more notify-send numfmt ps readlink rm sed sleep sort ssh stat sudo tar tail tr unzip uname uptime watch xargs)
+CMDS=(basename cat clear column cut date df dmesg du find grep gunzip head ip join kill ls less more notify-send numfmt ps readlink rm sed sleep sort ssh stat sudo tar tail tput tr unzip uname uptime watch xargs)
 OPTIONAL_CMDS=(7z awk bunzip2 curl dig lsof md5sum mtr netstat nmtui pgrep resolvectl sha256sum ss systemctl tmux traceroute unrar uncompress)
 
 # Single pass to map binaries to variables and aliases
@@ -41,7 +41,7 @@ done
 
 
 # CLEANUP OLD SESSION STATS #
-$_RM -f /dev/shm/bash_*_stats"${tty_suffix}" 2>/dev/null
+$_RM -f /dev/shm/bash_stats_"${tty_suffix}"_* 2>/dev/null
 
 
 # HISTORY SETTINGS #
@@ -75,18 +75,43 @@ else
 fi
 
 # Define common colors
+# Initialize Tput Capabilities
+if [[ -t 1 ]]; then
+    _T_RESET=$($_TPUT sgr0)
+    _T_BOLD=$($_TPUT bold)
+    _T_RED=$($_TPUT setaf 1)
+    _T_GRN=$($_TPUT setaf 2)
+    _T_YLW=$($_TPUT setaf 3)
+    _T_BLU=$($_TPUT setaf 4)
+    _T_CYN=$($_TPUT setaf 6)
+    _T_REV=$($_TPUT smso) # Standout/Reverse mode
+fi
+
+# Exporting for subshells and consistency
+export _CLR_B_GRN="$_T_BOLD$_T_GRN"     # Nominal / Success
+export _CLR_GRN="$_T_GRN"               # Nominal / Success
+export _CLR_B_YLW="$_T_BOLD$_T_YLW"     # Warning / Transition
+export _CLR_YLW="$_T_YLW"               # Warning / Transition
+export _CLR_B_RED="$_T_BOLD$_T_RED"     # Critical / Error
+export _CLR_RED="$_T_RED"               # Critical / Error
+export _CLR_B_BLU="$_T_BOLD$_T_BLU"     # Headers / Info
+export _CLR_B_CYN="$_T_CYN"             # Secondary Info
+export _CLR_BOLD="$_T_BOLD"             # High Emphasis
+export _CLR_R_BG="$_T_REV$_T_RED"       # Alert (White on Red)
+export _CLR_NC="$_T_RESET"              # No Color (Reset)
+
 # ANSI Color Codes (High Intensity/Bold)
-export _CLR_B_GRN='\e[1;32m'  # Nominal / Success
-export _CLR_GRN='\e[32m'      # Nominal / Success
-export _CLR_B_YLW='\e[1;33m'  # Warning / Transition
-export _CLR_YLW='\e[33m'      # Warning / Transition
-export _CLR_B_RED='\e[1;31m'  # Critical / Error
-export _CLR_RED='\e[31m'      # Critical / Error
-export _CLR_B_BLU='\e[1;34m'  # Headers / Info
-export _CLR_B_CYN='\e[36m'    # Secondary Info
-export _CLR_BOLD='\e[1m'      # High Emphasis
-export _CLR_R_BG='\e[41;37m'  # Alert (White on Red)
-export _CLR_NC='\e[0m'        # No Color (Reset)
+#export _CLR_B_GRN='\e[1;32m'  # Nominal / Success
+#export _CLR_GRN='\e[32m'      # Nominal / Success
+#export _CLR_B_YLW='\e[1;33m'  # Warning / Transition
+#export _CLR_YLW='\e[33m'      # Warning / Transition
+#export _CLR_B_RED='\e[1;31m'  # Critical / Error
+#export _CLR_RED='\e[31m'      # Critical / Error
+#export _CLR_B_BLU='\e[1;34m'  # Headers / Info
+#export _CLR_B_CYN='\e[36m'    # Secondary Info
+#export _CLR_BOLD='\e[1m'      # High Emphasis
+#export _CLR_R_BG='\e[41;37m'  # Alert (White on Red)
+#export _CLR_NC='\e[0m'        # No Color (Reset)
 
 # AWK-compatible versions (since AWK needs literal escape characters)
 export _AWK_B_GRN='\033[1;32m'
@@ -102,8 +127,8 @@ _define_prompt() {
     history -a; history -c; history -r
 
     # Use tput for cleaner color definitions (more portable)
-    local G='\[\e[01;32m\]' B='\[\e[01;34m\]' C='\[\e[36m\]'
-    local R='\[\e[31m\]' W='\[\e[00m\]' BOLD='\[\e[01m\]'
+    local G="$_CLR_B_GRN" B="$_CLR_B_BLU" C="$_CLR_B_CYN"
+    local R="$_CLR_B_RED" W="$_CLR_NC" BOLD="$_CLR_BOLD"
 
     # Check return/exit status
     if (( EXIT == 0 )); then
@@ -153,16 +178,30 @@ _loop_render() {
     local render_func="$2"
     shift 2
     if [[ "$interval" =~ ^[0-9]+$ ]]; then
-        trap 'break' SIGINT
-        while true; do "$render_func" "$@"; $_SLEEP "$interval"; done
-        trap - SIGINT
+        # Execute the loop in a subshell to isolate signal handling
+        (
+            # The EXIT trap inside the subshell triggers on any termination
+            trap '$_TPUT cnorm' EXIT
+            # Hide cursor for cleaner dashboard feel
+            $_TPUT civis 
+            while true; do
+                "$render_func" "$@"
+                $_SLEEP "$interval"
+            done
+       )
     else
-        "$render_func" "$@"
+        # For non-looping calls, we still want cursor protection for streaming functions
+        (
+            trap 'tput cnorm' EXIT
+            tput civis
+            "$render_func" "$@"
+        )    
     fi
 }
 
 bin-audit() {
     : "Audit environment for required and optional binaries and mapping status"
+    local cmd var_name found core func_list func bin_path found_collision
     echo -e "${_CLR_B_BLU}--- Environment Capability Audit ---${_CLR_NC}"
 
     # Audit Core Binaries
@@ -191,11 +230,11 @@ bin-audit() {
 
     # Shadowing Audit
     echo -e "\n${_CLR_B_YLW}[Command Shadowing]${_CLR_NC}"
-    local func_list; func_list=$(declare -F | $_AWK '{print $3}' | $_GREP -vE '^(_|usage|quote|dequote|command_not_found)')
-    local found_collision=false
+    func_list=$(declare -F | $_AWK '{print $3}' | $_GREP -vE '^(_|usage|quote|dequote|command_not_found)')
+    found_collision=false
 
     for func in $func_list; do
-        local bin_path; bin_path=$(type -ap "$func" | $_HEAD -n 1)
+        bin_path=$(type -ap "$func" | $_HEAD -n 1)
         if [[ -n "$bin_path" ]]; then
             printf "  %-12s : ${_CLR_RED}Warning: Masks %s${_CLR_NC}\n" "$func" "$bin_path"
             found_collision=true
@@ -316,14 +355,14 @@ io-audit() {
     : "Filesystem usage and real-time Disk IOPS"
     local interval="$1"
     local tty_suffix=${TTY//\//_}
-    local iops_file="/dev/shm/bash_iops_stats${tty_suffix}"
+    local iops_file="/dev/shm/bash_stats_${tty_suffix}_iops"
 
     _render_io() {
-        local now; now=$($_DATE +%s)
+        local now=$($_DATE +%s)
         [[ -n "$interval" ]] && $_CLEAR
         echo -e "${_CLR_B_GRN}Storage Monitoring${_CLR_NC} $([[ -n "$interval" ]] && echo "(Interval: ${interval}s)")"
 
-        local stats_snapshot; stats_snapshot=$($_CAT /proc/diskstats)
+        local stats_snapshot=$($_CAT /proc/diskstats)
         
         # Capture columns directly: dev_node=$1, fs_size=$2, fs_perc=$5, fs_mnt=$6
         while read -r dev_node fs_size _ _ fs_perc fs_mnt; do
@@ -335,20 +374,20 @@ io-audit() {
 
             # Standard block device resolution
             if [[ -d "/sys/class/block/$block_dev/slaves" ]]; then
-                local slave; slave=$($_LS "/sys/class/block/$block_dev/slaves" | $_HEAD -n1)
+                local slave=$($_LS "/sys/class/block/$block_dev/slaves" | $_HEAD -n1)
                 [[ -n "$slave" ]] && block_dev="$slave"
             fi
 
-            local dev_stats; dev_stats=$($_GREP -w "$block_dev" <<< "$stats_snapshot")
+            local dev_stats=$($_GREP -w "$block_dev" <<< "$stats_snapshot")
             # Mapping /proc/diskstats: 4=riops, 6=rsect, 8=wiops, 10=wsect
             # We use '_' to skip irrelevant indices
             read -r _ _ _ riops_now _ rsect_now _ wiops_now _ wsect_now _ <<< "$dev_stats"
 
-            local s_size; s_size=$($_CAT "/sys/class/block/$block_dev/queue/hw_sector_size" 2>/dev/null || echo 512)
+            local s_size=$($_CAT "/sys/class/block/$block_dev/queue/hw_sector_size" 2>/dev/null || echo 512)
 
             local r_speed="0.00" w_speed="0.00" r_iops="0" w_iops="0"
             if [[ -f "$iops_file" ]]; then
-                local last_data; last_data=$($_GREP "^$block_dev " "$iops_file")
+                local last_data=$($_GREP "^$block_dev " "$iops_file")
                 if [[ -n "$last_data" ]]; then
                     read -r _ last_t last_ri last_rs last_wi last_ws <<< "$last_data"
                     local t_diff=$((now - last_t))
@@ -388,7 +427,17 @@ io-audit() {
 
 ip-local() {
     : "Mapping of network interfaces to IP, MAC, and Status"
-    echo -e "${_CLR_B_GRN}Interface IP/MAC Mapping:${_CLR_NC}"
+    local show_header=true
+    local OPTIND=1
+    while getopts "n" opt; do
+        case "$opt" in
+            n) show_header=false ;;
+            *) return 1 ;;
+        esac
+    done
+    shift $((OPTIND-1))
+
+    [[ "$show_header" == true ]] && echo -e "${_CLR_B_GRN}Interface IP/MAC Mapping:${_CLR_NC}"
 
     local link_info=$($_IP -brief link show)
     
@@ -396,24 +445,54 @@ ip-local() {
     BEGIN {
         n = split(links, a, "\n")
         for (i=1; i<=n; i++) {
-            split(a[i], b)
-            meta[b[1]] = b[2] "  " b[3]
+            split(a[i], b); meta[b[1]] = b[2] "  " b[3]
         }
     }
-    {
-        printf "%-10s %-20s %s\n", $1, $3, meta[$1]
-    }' | $_COLUMN -t | $_SED 's/^/  /'
+    $1 != "lo" {
+        printf "  %-12s %-18s %s\n", $1":", $3, meta[$1]
+    }'
 }
 
 log-watch() {
-    : "Stream log files with high-visibility color highlighting for errors/critical events"
-    local log_file="${1:-/var/log/syslog}"
-    [[ -f "$log_file" ]] || { echo "Error: Log file $log_file not found."; return 1; }
+    : "Stream log files with high-visibility color highlighting; -a flag shows all lines"
+    local log_file=""
+    local show_all=false
+    local OPTIND=1
 
-    echo -e "${_CLR_B_BLU}--- Watching $log_file [Ctrl+C to exit] ---${_CLR_NC}"
+    # Parse options
+    while getopts "a" opt; do
+        case "$opt" in
+            a) show_all=true ;;
+            *) echo "Usage: log-watch [-a] [file]"; return 1 ;;
+        esac
+    done
+    shift $((OPTIND - 1))
 
-    # Highlight keywords: ERROR, FATAL, FAIL, CRITICAL, DENIED
-    "$_TAIL" -f "$log_file" | "$_GREP" --color=always -Ei 'error|fatal|fail|critical|denied|warn|panic'
+    log_file="${1:-/var/log/syslog}"
+    
+    [[ -f "$log_file" ]] || { 
+        echo -e "${_CLR_B_RED}Error:${_CLR_NC} Log file $log_file not found."
+        return 1 
+    }
+
+    _render_log() {
+        local file="$1"
+        local mode="$2"
+        echo -e "${_CLR_B_BLU}--- Watching $file [Ctrl+C to exit] ---${_CLR_NC}"
+
+        # Define the regex for critical keywords
+        local regex='error|fatal|fail|critical|denied|warn|panic' 
+
+        if [[ "$mode" == "true" ]]; then
+            # Use GREP in "pass-through" mode: match the regex OR match the start of every line
+            # This ensures all lines are printed, but only the regex keywords are colored
+            "$_TAIL" -f "$file" | "$_GREP" --color=always -Ei "$regex|$"
+        else
+            # Standard filtered view
+            "$_TAIL" -f "$file" | "$_GREP" --color=always -Ei "$regex"
+        fi
+    }
+    _loop_render "stream" _render_log "$log_file" "$show_all"
 }
 
 ls-new() {
@@ -517,71 +596,57 @@ mem-top() {
 
 net-audit() {
     : "Report external IP, local interfaces, gateway, DNS, and real-time transfer rates"
-    local interval="$1"
-    local tty_suffix=${TTY//\//_}
-    local net_file="/dev/shm/bash_net_stats${tty_suffix}"
+    local interval="" utilization_only="" tty_suffix=${TTY//\//_}
 
-    usage() {
-        echo "Usage: net-audit [-h] [interval_seconds]"
-        echo "  -h                Display this help message"
-        echo "  interval_seconds  Optional. If set, runs in a real-time loop."
-        return 0
-    }
-
-    case "$1" in
-        "-h") usage; return 0 ;;
-        ''|[0-9]*) interval="$1" ;;
-        *) usage; return 10 ;;
-    esac
+    OPTIND=1
+    while getopts "hu" opt; do
+        case "$opt" in
+            h) echo "Usage: net-audit [-h] [-u] [interval]"; return 0 ;;
+            u) utilization_only=true ;;
+            *) return 10 ;;
+        esac
+    done
+    shift $((OPTIND-1))
+    interval=$1
 
     local ext_ip=""
-    if [[ -n "$_CURL" ]]; then
-        ext_ip=$("$_CURL" -s --connect-timeout 3 https://ifconfig.me)
-    fi
+    [[ -n "$_CURL" && -z "$utilization_only" ]] && ext_ip=$("$_CURL" -s --connect-timeout 3 https://ifconfig.me)
 
     _render_net() {
         [[ -n "$interval" ]] && $_CLEAR
-        echo -e "${_CLR_B_BLU}--- Network Audit ---${_CLR_NC} $([[ -n $interval ]] && echo "(Interval: ${interval}s)")"
-        
-        [[ -n "$ext_ip" ]] && echo -e "${_CLR_B_GRN}External IP:${_CLR_NC} $ext_ip"
+        [[ -z "$utilization_only" ]] && echo -e "${_CLR_B_BLU}--- Network Audit ---${_CLR_NC} $([[ -n $interval ]] && echo "(Interval: ${interval}s)")"
 
-        ip-local
-
-        echo -ne "${_CLR_B_GRN}Default Gateway:${_CLR_NC} "
-        if [[ -f /proc/net/route ]]; then
-            local gw_hex=$("$_AWK" '$2 == "00000000" {print $3}' /proc/net/route | $_HEAD -n1)
-            if [[ -n "$gw_hex" ]]; then
-                printf "%d.%d.%d.%d\n" 0x${gw_hex:6:2} 0x${gw_hex:4:2} 0x${gw_hex:2:2} 0x${gw_hex:0:2}
-            else
-                echo "None"
-            fi
-        else
-            $_IP route | "$_GREP" default | "$_AWK" '{print $3}'
+        if [[ -z "$utilization_only" ]]; then
+            [[ -n "$ext_ip" ]] && echo -e "${_CLR_B_GRN}External IP:${_CLR_NC} $ext_ip"
+            ip-local
+            echo -e "${_CLR_B_GRN}Default Gateway:${_CLR_NC}"
+            $_IP route | $_GREP default | $_AWK '{print "  " $3 " via " $5}' | $_HEAD -n1
+            echo -e "${_CLR_B_GRN}DNS Resolvers:${_CLR_NC}"
+            [[ -n "$_RESOLVECTL" ]] && $_RESOLVECTL status | $_GREP "DNS Servers" | $_SED -E 's/^[[:space:]]+//; s/^/  /' || $_CAT /etc/resolv.conf | $_GREP nameserver | $_SED 's/^/  /'
         fi
 
-        echo -e "${_CLR_B_GRN}DNS Resolvers:${_CLR_NC}"
-        if [[ -n "$_RESOLVECTL" ]]; then
-            $_RESOLVECTL status | $_GREP "DNS Servers" | $_SED -E 's/^[[:space:]]+//; s/^/  /'
-        else
-            $_CAT /etc/resolv.conf | $_GREP nameserver | $_SED 's/^/  /'
-        fi
-        
-        local interface; read -r _ _ _ _ interface _ < <($_IP route | $_GREP default | $_HEAD -n1)
-        if [[ -n "$interface" && -f /proc/net/dev ]]; then
+        echo -e "${_CLR_B_GRN}Network Utilization:${_CLR_NC}"
+        while read -r line; do
+            local interface=$(echo "$line" | $_CUT -d: -f1 | $_XARGS)
+            [[ "$interface" == "lo" ]] && continue
+            
             local now=$($_DATE +%s)
-            read -r _ rx_now _ _ _ _ _ _ _ tx_now _ <<< "$($_GREP "$interface" /proc/net/dev)"
-            local rx_speed=0; local tx_speed=0
-
+            local net_file="/dev/shm/bash_stats_${tty_suffix}_net_${interface}"
+            read -r _ rx_now _ _ _ _ _ _ _ tx_now _ <<< "$(echo "$line" | $_CUT -d: -f2)"
+            
+            local rx_speed=0 tx_speed=0
             if [[ -f "$net_file" ]]; then
                 read -r last_t last_rx last_tx < "$net_file"
                 local t_diff=$((now - last_t))
                 [[ $t_diff -gt 0 ]] && rx_speed=$(((rx_now - last_rx) / 1024 / t_diff)) && tx_speed=$(((tx_now - last_tx) / 1024 / t_diff))
             fi
             echo "$now $rx_now $tx_now" > "$net_file"
-            printf "${_CLR_B_GRN}Net Rates ($interface):${_CLR_NC} RX: ${_CLR_B_YLW}%s KB/s${_CLR_NC} | TX: ${_CLR_B_YLW}%s KB/s${_CLR_NC}\n" "$rx_speed" "$tx_speed"
-        fi
+
+            # Clean formatting: 12-char interface width, 7-char speed width, no extra spaces in labels
+            printf "  %-12s RX: %b%s KB/s%b | TX: %b%s KB/s%b\n" \
+                "${interface}:" "${_CLR_B_YLW}" "$rx_speed" "${_CLR_NC}" "${_CLR_B_YLW}" "$tx_speed" "${_CLR_NC}"
+        done < <($_TAIL -n +3 /proc/net/dev)
     }
-    # Call looping function
     _loop_render "$interval" _render_net
 }
 
@@ -647,10 +712,10 @@ proc-top() {
         # PS_FORMAT: %cpu=2, rss=3, comm=4
         $_PS -eo user,%cpu,rss,comm --no-headers | $_AWK -v count="$count" '
         {
-            key=$1"|"$4; 
-            cpu[key]+=$2; 
+            key=$1"|"$4;
+            cpu[key]+=$2;
             rss[key]+=$3
-        } 
+        }
         END {
             for (i in cpu) {
                 split(i, k, "|");
@@ -679,6 +744,41 @@ qgrep() {
 
     # Using -print0/xargs -0 to handle spaces/special characters in filenames safely
     $_FIND . $depth_arg -type f -not -path '*/.*' -print0 | $_XARGS -0 $_GREP -Hn --color=always "$term"
+}
+
+svc-audit() {
+    : "Monitor health and uptime of critical systemd services"
+    local interval="$1"
+    
+    # Define services you consider 'critical' for your environment
+    #local critical_svcs=("sshd" "docker" "nginx" "postgresql" "samba" "ufw")
+    local critical_svcs=("sshd" "ufw")
+
+    _render_svc() {
+        local svc state status load_clr uptime
+        [[ -n "$interval" ]] && $_CLEAR
+        echo -e "${_CLR_B_BLU}--- Systemd Service Health ---${_CLR_NC} $([[ -n $interval ]] && echo "(Interval: ${interval}s)")"
+        
+        for svc in "${critical_svcs[@]}"; do
+            # Extract state and substate in a single call
+            read -r state status uptime < <($_SYSTEMCTL show "$svc" --property=ActiveState,SubState,ActiveEnterTimestamp | \
+                $_SED 's/.*=//' | $_XARGS)
+            
+            # Logic: Active/Running = Green, anything else = Red
+            if [[ "$state" == "active" ]]; then
+                load_clr="$_CLR_GRN"
+            else
+                load_clr="$_CLR_B_RED"
+            fi
+            
+            # Calculate uptime if available
+            [[ "$uptime" == "n/a" ]] && uptime="---"
+            
+            printf "  %-15s : %b[%s/%s]%b  Uptime: %s\n" \
+                "$svc" "$load_clr" "$state" "$status" "$_CLR_NC" "$uptime"
+        done
+    }   
+    _loop_render "$interval" _render_svc
 }
 
 stats() {
@@ -767,8 +867,9 @@ stats() {
 
         # 4. Modules
         io-audit
-        local interface; interface=$($_IP route | $_GREP default | $_AWK '{print $5}' | $_HEAD -n1)
-        [[ -n "$interface" ]] && net-audit | $_GREP "Net Rates"
+        echo -e "${_CLR_B_GRN}Network Status:${_CLR_NC}"
+        ip-local -n
+        net-audit -u 
 
         # 5. Fault Detection (OOM & Zombie detection)
         if [[ ! -n "$interval" ]]; then
@@ -851,7 +952,7 @@ _cleanup() {
     : "Remove TTY-specific stat files from memory on exit"
     local tty_suffix=${TTY//\//_}
     # Only remove if tty_suffix is not empty to avoid globbing errors
-    [[ -n "$tty_suffix" ]] && $_RM -f /dev/shm/bash_*_stats"${tty_suffix}"
+    [[ -n "$tty_suffix" ]] && $_RM -f /dev/shm/bash_stats_"${tty_suffix}"_* 2>/dev/null
 }
 # Execute cleanup when the shell exits
 trap _cleanup EXIT
