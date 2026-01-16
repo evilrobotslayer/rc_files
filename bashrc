@@ -2,42 +2,68 @@
 # If not running interactively, don't do anything
 [[ $- != *i* ]] && return
 
-# Ensure TTY is set and clean stale stats
+# Ensure TTY is set
 [[ -z "$TTY" ]] && TTY=$(tty)
 tty_suffix=${TTY//\//_}
 
 
 # SET SECURE BIN PATHS #
-# Define the common binary search paths
-BIN_SEARCH_PATHS=("/usr/bin" "/bin" "/usr/local/bin")
+_init_security() {
+    # Define the common binary search paths
+    _BIN_SEARCH_PATHS=("/usr/bin" "/bin" "/usr/local/bin")
+    # Security Check: Ensure path is root-owned and not world-writable (o-w)
+    for i in "${!_BIN_SEARCH_PATHS[@]}"; do
+        local path="${_BIN_SEARCH_PATHS[i]}"
+        local stats
+        stats=$(/usr/bin/stat -c "%u %a" "$path" 2>/dev/null)
+        # Remove and continue loop if path doesn't exist
+        [[ -z "$stats" ]] && { unset "_BIN_SEARCH_PATHS[$i]"; continue; }
 
-# Define the commands you want to secure
-# Combined List for initial path validation
-CMDS=(basename cat clear column cut date df dmesg du find grep gunzip head ip join kill ls less more notify-send numfmt ps readlink rm sed sleep sort ssh stat sudo tar tail tput tr unzip uname uptime watch xargs)
-OPTIONAL_CMDS=(7z awk bunzip2 curl dig lsof md5sum mtr netstat nmtui pgrep resolvectl sha256sum ss systemctl tmux traceroute unrar uncompress)
-
-# Single pass to map binaries to variables and aliases
-for cmd in "${CMDS[@]}" "${OPTIONAL_CMDS[@]}"; do
-    found=false
-    for path in "${BIN_SEARCH_PATHS[@]}"; do
-        if [[ -x "$path/$cmd" ]]; then
-            var_name="_${cmd^^}"
-            var_name="${var_name//-/_}"
-            printf -v "$var_name" "%s" "$path/$cmd"
-            alias "$cmd"="${!var_name}"
-            found=true
-            break
+        # Split $stats into two variables for owner and perms
+        read -r owner perms <<< "$stats"
+        
+        # Check: Not root-owned OR world-writable
+        # 0002 is the bitmask for world-writable
+        # 0020 is the bitmask for group-writable
+        # 8#$mode forces Bash to interpret the variable as an octal number
+        if [[ "$owner" != "0" ]] || (( (8#$perms & 0002) != 0 )); then
+            echo "${_CLR_B_YLW}Warning: Removing insecure path $path${_CLR_NC}" >&2
+            unset "_BIN_SEARCH_PATHS[$i]"
         fi
     done
-    # Only exit on missing Core CMDS
-    if [[ "$found" == false ]]; then
-        for core in "${CMDS[@]}"; do
-            if [[ "$cmd" == "$core" ]]; then
-                echo "Error: Critical binary '$cmd' not found" >&2
+    # Re-index to collapse holes
+    _BIN_SEARCH_PATHS=("${_BIN_SEARCH_PATHS[@]}")
+
+    # Define the commands you want to secure
+    # Combined List for initial path validation
+    CMDS=(basename cat clear column cut date df dmesg du find grep gunzip head ip join kill ls less more notify-send numfmt ps readlink rm sed sleep sort ssh stat sudo tar tail tput tr unzip uname uptime watch xargs)
+    OPTIONAL_CMDS=(7z apt apt-get apt-cache awk bunzip2 curl dig dnf expac lsof md5sum mtr netstat nmtui pacman pgrep resolvectl rpm sha256sum ss systemctl tmux traceroute unrar uncompress yum)
+
+    # Single pass to map binaries to variables and aliases
+    for cmd in "${CMDS[@]}" "${OPTIONAL_CMDS[@]}"; do
+        local found=false
+        local var_name
+        for path in "${_BIN_SEARCH_PATHS[@]}"; do
+            if [[ -x "$path/$cmd" ]]; then
+                var_name="_${cmd^^}"
+                var_name="${var_name//-/_}"
+                printf -v "$var_name" "%s" "$path/$cmd"
+                alias "$cmd"="${!var_name}"
+                found=true
+                break
             fi
         done
-    fi
-done
+        # Only exit on missing Core CMDS
+        if [[ "$found" == false ]]; then
+            for core in "${CMDS[@]}"; do
+                if [[ "$cmd" == "$core" ]]; then
+                    echo "${_CLR_B_RED}Error: Critical binary '$cmd' not found${_CLR_NC}" >&2
+                fi
+            done
+        fi
+    done
+}
+_init_security
 
 
 # CLEANUP OLD SESSION STATS #
@@ -177,11 +203,18 @@ _loop_render() {
     local interval="$1"
     local render_func="$2"
     shift 2
+
+    # Global cleanup to ensure cursor restoration
+    _restore_cursor() {
+        $_TPUT cnorm
+        stty echo
+    }
+
     if [[ "$interval" =~ ^[0-9]+$ ]]; then
         # Execute the loop in a subshell to isolate signal handling
         (
             # The EXIT trap inside the subshell triggers on any termination
-            trap '$_TPUT cnorm' EXIT
+            trap '_restore_cursor; exit' SIGINT SIGTERM EXIT
             # Hide cursor for cleaner dashboard feel
             $_TPUT civis 
             while true; do
@@ -192,8 +225,8 @@ _loop_render() {
     else
         # For non-looping calls, we still want cursor protection for streaming functions
         (
-            trap 'tput cnorm' EXIT
-            tput civis
+            trap '_restore_cursor' EXIT
+            $_TPUT civis
             "$render_func" "$@"
         )    
     fi
@@ -275,7 +308,7 @@ du-top() {
     [[ "$count" =~ ^[0-9]+$ ]] || count=10
 
     echo -e "${_CLR_B_BLU}--- Top $count Directories in $dir ---${_CLR_NC}"
-    "$_DU" -hd 1 "$dir" 2>/dev/null | "$_SORT" -hr | "$_SED" "$((count + 1))q" | "$_COLUMN" -t
+    "$_DU" -x -hd 1 "$dir" 2>/dev/null | "$_SORT" -hr | "$_SED" "$((count + 1))q" | "$_COLUMN" -t
 }
 
 extract() {
@@ -358,7 +391,9 @@ io-audit() {
     local iops_file="/dev/shm/bash_stats_${tty_suffix}_iops"
 
     _render_io() {
-        local now=$($_DATE +%s)
+        local now
+        printf -v now '%(%s)T' -1
+
         [[ -n "$interval" ]] && $_CLEAR
         echo -e "${_CLR_B_GRN}Storage Monitoring${_CLR_NC} $([[ -n "$interval" ]] && echo "(Interval: ${interval}s)")"
 
@@ -451,6 +486,45 @@ ip-local() {
     $1 != "lo" {
         printf "  %-12s %-18s %s\n", $1":", $3, meta[$1]
     }'
+}
+
+log-tail() {
+    : "Aggregate system errors with follow support"
+    
+    local follow=false
+    local count=10
+    local OPTIND
+    
+    while getopts "fu:" opt; do
+        case "$opt" in
+            f) follow=true ;;
+            u) usage; return 0 ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+    
+    [[ -n "$1" ]] && count="$1"
+
+    echo -e "${_CLR_B_RED}System Errors (Priority 0-3):${_CLR_NC}"
+    
+    if [[ -n "$_SYSTEMCTL" ]]; then
+        local args=("-p" "0..3" "-n" "$count" "--no-hostname" "--no-pager")
+        [[ "$follow" == true ]] && args+=("-f")
+        journalctl "${args[@]}"
+    else
+        # Traditional fallback logic
+        local log_file=""
+        [[ -f /var/log/syslog ]] && log_file="/var/log/syslog"
+        [[ -f /var/log/messages ]] && log_file="/var/log/messages"
+        
+        if [[ -n "$log_file" ]]; then
+            if [[ "$follow" == true ]]; then
+                $_TAIL -f "$log_file" | $_GREP -iE "error|fail|critical"
+            else
+                $_GREP -iE "error|fail|critical" "$log_file" | $_TAIL -n "$count"
+            fi
+        fi
+    fi
 }
 
 log-watch() {
@@ -670,6 +744,93 @@ out2var() {
     out_var="$("$@")"
 }
 
+pkg-check() {
+    : "Check versions and last update date for a list of packages"
+    
+    usage() {
+        echo "Usage: pkg-check [-u] [package1 package2 ...]"
+        echo "  -u    Display this usage information"
+        return 0
+    }
+
+    local OPTIND
+    while getopts "u" opt; do
+        case "$opt" in
+            u) usage; return 0 ;;
+            *) usage; return 1 ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    [[ $# -eq 0 ]] && { echo -e "${_CLR_B_RED}Error:${_CLR_NC} No packages specified."; usage; return 1; }
+
+    # Robust Distro Detection
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        local distro_info="${ID} ${ID_LIKE}"
+    else
+        return 1
+    fi
+
+    local output="Package|Installed|Latest|Last Updated\n"
+
+    for pkg in "$@"; do
+        local installed_ver="N/A" latest_ver="N/A" last_date="Unknown"
+
+        # Debian/Ubuntu (apt-based)
+        if [[ "$distro_info" =~ "debian" || "$distro_info" =~ "ubuntu" ]]; then
+            if [[ -n "$_APT_CACHE" ]]; then
+                while IFS='=' read -r key val; do
+                    [[ "$key" == "Installed" ]] && installed_ver="$val"
+                    [[ "$key" == "Candidate" ]] && latest_ver="$val"
+                done < <($_APT_CACHE policy "$pkg" 2>/dev/null | $_AWK -F': ' '/Installed:|Candidate:/ {gsub(/^[ \t]+/, "", $1); print $1"="$2}')
+            fi
+            # Date detection: Log grep with stat fallback
+            last_date=$($_GREP "status installed $pkg:" /var/log/dpkg.log* 2>/dev/null | $_SORT -r | $_HEAD -n 1 | $_CUT -d' ' -f1,2)
+            if [[ -z "$last_date" && -f "/var/lib/dpkg/info/${pkg}.list" ]]; then
+                last_date=$($_STAT -c '%y' "/var/lib/dpkg/info/${pkg}.list" 2>/dev/null | $_CUT -d'.' -f1)
+            fi
+
+        # Red Hat/Fedora/Enterprise Linux (rpm-based)
+        elif [[ "$distro_info" =~ "rhel" || "$distro_info" =~ "fedora" || "$distro_info" =~ "centos" ]]; then
+            if [[ -n "$_RPM" ]]; then
+                installed_ver=$($_RPM -q --qf "%{VERSION}-%{RELEASE}" "$pkg" 2>/dev/null)
+                # RPM provides installation date natively
+                last_date=$($_RPM -q --last "$pkg" 2>/dev/null | $_HEAD -n 1 | $_AWK '{print $2,$3,$4,$5}')
+            fi
+            if [[ -n "$_DNF" ]]; then
+                latest_ver=$($_DNF list updates "$pkg" 2>/dev/null | $_AWK -v p="$pkg" '$1 ~ p {print $2}')
+            fi
+            [[ -z "$latest_ver" || "$latest_ver" == "N/A" ]] && latest_ver=$installed_ver
+
+        # Arch Linux (pacman-based)
+        elif [[ "$distro_info" =~ "arch" ]]; then
+            if [[ -n "$_PACMAN" ]]; then
+                installed_ver=$($_PACMAN -Q "$pkg" 2>/dev/null | $_AWK '{print $2}')
+                latest_ver=$($_PACMAN -Si "$pkg" 2>/dev/null | $_GREP "Version" | $_AWK '{print $3}')
+                last_date=$($_PACMAN -Qi "$pkg" 2>/dev/null | $_GREP "Install Date" | $_CUT -d':' -f2-)
+            fi
+        fi
+
+        # Color-coding for Latest column if update is available
+        local latest_display="$latest_ver"
+        if [[ "$installed_ver" != "$latest_ver" && "$latest_ver" != "N/A" ]]; then
+            latest_display="${_CLR_B_RED}${latest_ver}${_CLR_NC}"
+        fi
+
+        output+="${pkg}|${installed_ver:-None}|${latest_display}|${last_date:-Unknown}\n"
+    done
+
+    # Final formatted render with automatic column sizing
+    echo -e "$output" | $_COLUMN -t -s '|' | $_AWK -v blu="${_AWK_B_BLU}" -v nc="${_AWK_NC}" '
+        NR==1 { 
+            print blu $0 nc; 
+            line=$0; gsub(/./, "-", line); print line; 
+            next 
+        } 
+        { print $0 }'
+}
+
 ports-ls() {
     : "List all listening IPv4/IPv6 sockets with associated process metadata"
     echo -e "${_CLR_B_BLU}--- Listening Sockets (IPv4/IPv6) ---${_CLR_NC}"
@@ -744,41 +905,6 @@ qgrep() {
 
     # Using -print0/xargs -0 to handle spaces/special characters in filenames safely
     $_FIND . $depth_arg -type f -not -path '*/.*' -print0 | $_XARGS -0 $_GREP -Hn --color=always "$term"
-}
-
-svc-audit() {
-    : "Monitor health and uptime of critical systemd services"
-    local interval="$1"
-    
-    # Define services you consider 'critical' for your environment
-    #local critical_svcs=("sshd" "docker" "nginx" "postgresql" "samba" "ufw")
-    local critical_svcs=("sshd" "ufw")
-
-    _render_svc() {
-        local svc state status load_clr uptime
-        [[ -n "$interval" ]] && $_CLEAR
-        echo -e "${_CLR_B_BLU}--- Systemd Service Health ---${_CLR_NC} $([[ -n $interval ]] && echo "(Interval: ${interval}s)")"
-        
-        for svc in "${critical_svcs[@]}"; do
-            # Extract state and substate in a single call
-            read -r state status uptime < <($_SYSTEMCTL show "$svc" --property=ActiveState,SubState,ActiveEnterTimestamp | \
-                $_SED 's/.*=//' | $_XARGS)
-            
-            # Logic: Active/Running = Green, anything else = Red
-            if [[ "$state" == "active" ]]; then
-                load_clr="$_CLR_GRN"
-            else
-                load_clr="$_CLR_B_RED"
-            fi
-            
-            # Calculate uptime if available
-            [[ "$uptime" == "n/a" ]] && uptime="---"
-            
-            printf "  %-15s : %b[%s/%s]%b  Uptime: %s\n" \
-                "$svc" "$load_clr" "$state" "$status" "$_CLR_NC" "$uptime"
-        done
-    }   
-    _loop_render "$interval" _render_svc
 }
 
 stats() {
@@ -892,6 +1018,76 @@ stats() {
     }
     # Call looping function
     _loop_render "$interval" _render_dashboard
+}
+
+svc-audit() {
+    : "Monitor health and uptime of critical systemd services"
+    local interval="$1"
+    
+    # Define services you consider 'critical' for your environment
+    #local critical_svcs=("sshd" "docker" "nginx" "postgresql" "samba" "ufw")
+    local critical_svcs=("sshd" "ufw")
+
+    _render_svc() {
+        local svc state status load_clr uptime
+        [[ -n "$interval" ]] && $_CLEAR
+        echo -e "${_CLR_B_BLU}--- Systemd Service Health ---${_CLR_NC} $([[ -n $interval ]] && echo "(Interval: ${interval}s)")"
+        
+        for svc in "${critical_svcs[@]}"; do
+            # Extract state and substate in a single call
+            read -r state status uptime < <($_SYSTEMCTL show "$svc" --property=ActiveState,SubState,ActiveEnterTimestamp | \
+                $_SED 's/.*=//' | $_XARGS)
+            
+            # Logic: Active/Running = Green, anything else = Red
+            if [[ "$state" == "active" ]]; then
+                load_clr="$_CLR_GRN"
+            else
+                load_clr="$_CLR_B_RED"
+            fi
+            
+            # Calculate uptime if available
+            [[ "$uptime" == "n/a" ]] && uptime="---"
+            
+            printf "  %-15s : %b[%s/%s]%b  Uptime: %s\n" \
+                "$svc" "$load_clr" "$state" "$status" "$_CLR_NC" "$uptime"
+        done
+    }   
+    _loop_render "$interval" _render_svc
+}
+
+sys-audit() {
+    : "Map listening ports to systemd services with process ownership"
+
+    # Check for root/sudo for process mapping competence
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${_CLR_YLW}[!] Partial results: Run with sudo to resolve system-owned processes.${_CLR_NC}"
+    fi
+
+    local output="Proto|Port|Address|Service/Process|Status\n"
+
+    while read -r proto port addr pid_info; do
+        local proc_name="Unknown"
+        local status="--"
+
+        # Parse PID and Process name from ss output
+        if [[ "$pid_info" =~ users:\(\(\"([^\"]+)\",pid=([0-9]+) ]]; then
+            proc_name="${BASH_REMATCH[1]}"
+            local pid="${BASH_REMATCH[2]}"
+
+            # Cross-reference systemd unit
+            local unit
+            unit=$($_SYSTEMCTL status "$pid" 2>/dev/null | $_HEAD -n 1 | $_AWK '{print $2}')
+            if [[ -n "$unit" ]]; then
+                proc_name="$unit"
+                status=$($_SYSTEMCTL is-active "$unit" 2>/dev/null)
+            fi
+        fi
+        output+="${proto}|${port}|${addr}|${proc_name}|${status}\n"
+    done < <($_SS -tulnpH | $_AWK '{split($5, a, ":"); print $1, a[length(a)], $5, $7}')
+
+    echo -e "$output" | $_COLUMN -t -s '|' | $_AWK -v blu="${_AWK_B_BLU}" -v nc="${_AWK_NC}" '
+        NR==1 { print blu $0 nc; line=$0; gsub(/./, "-", line); print line; next }
+        { print $0 }'
 }
 
 util-ls() {
