@@ -1,4 +1,4 @@
-# INTERACTIVE CHECK & INITIALIZATION #
+#io INTERACTIVE CHECK & INITIALIZATION #
 # If not running interactively, don't do anything
 [[ $- != *i* ]] && return
 
@@ -445,16 +445,21 @@ io-audit() {
             (( perc_val > 50 )) && BAR_COLOR="$_CLR_B_YLW"
             (( perc_val > 85 )) && BAR_COLOR="$_CLR_B_RED"
 
-            local f=$((perc_val / 5)) e=$((20 - f))
-            local bar; printf -v bar "%${f}s" ""; bar=${bar// /#}
-            local spc; printf -v spc "%${e}s" ""; spc=${spc// /-}
+            # Use fixed 20-character width for the total bar area
+            local f=$((perc_val / 5))
+            local e=$((20 - f))
+
+            # Ensure strings are generated cleanly
+            local bar="" spc=""
+            [[ $f -gt 0 ]] && printf -v bar "%${f}s" ""; bar=${bar// /#}
+            [[ $e -gt 0 ]] && printf -v spc "%${e}s" ""; spc=${spc// /-}
 
             local threshold=90; [[ "$fs_mnt" == "/" || "$fs_mnt" == "/boot"* ]] && threshold=80
             local alert=" "; [[ $perc_val -ge $threshold ]] && alert="${_CLR_R_BG}!${_CLR_NC}"
 
-            printf "  %b %-15s [%s] [%b%s%b%s] %3d%% | R:%5s KB/s (%s iops) | W:%5s KB/s (%s iops)\n" \
-                "$alert" "$fs_mnt" "$fs_size" "$BAR_COLOR" "$bar" "$_CLR_NC" "$spc" "$perc_val" "$r_speed" "$r_iops" "$w_speed" "$w_iops"
-
+            # Use specific width formatting in the final printf to lock the alignment
+            printf "  %b %-15s [%s] [%b%-s%b%-s] %3d%% | R:%5s KB/s (%s iops) | W:%5s KB/s (%s iops)\n" \
+              "$alert" "$fs_mnt" "$fs_size" "$BAR_COLOR" "$bar" "$_CLR_NC" "$spc" "$perc_val" "$r_speed" "$r_iops" "$w_speed" "$w_iops"
         done < <($_DF -h)
     }
     _loop_render "$interval" _render_io
@@ -1129,6 +1134,7 @@ unset -f _check_collisions
 
 
 # STARTUP VISUALS #
+echo
 # Don't forget neofetch
 # https://github.com/dylanaraps/neofetch
 [[ -x /usr/bin/neofetch ]] && /usr/bin/neofetch
