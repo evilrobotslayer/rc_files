@@ -8,6 +8,7 @@
 """"""""""""""""""
 set nocompatible                        " be iMproved, required
 set encoding=utf8                       " Set default file encoding
+scriptencoding utf-8
 set ffs=unix,dos,mac                    " Set default file formats to try
 set t_Co=256                            " Set 256 Colors
 set history=700                         " Sets how many lines of history VIM has to remember
@@ -18,9 +19,13 @@ set mat=2                               " How many tenths of a second to blink w
 set wildmenu                            " Turn on the WiLd menu
 set wildignore=*.o,*~,*.pyc             " Ignore compiled files
 set lazyredraw                          " Don't redraw while executing macros (good performance config)
+set ttyfast                             " Indicates a fast terminal connection
 set listchars=eol:$,tab:>-,trail:~,extends:>,precedes:<         " Assign characters for whitespace
 " Newer versions of VIM ( >= 7.4.710) can also show spaces
-" set listchars=eol:$,tab:>-,trail:~,extends:>,precedes:<space:␣
+if has("patch-7.4.710")
+    " The backslash is required before the space if using a literal space character
+    set listchars+=space:␣
+endif
 
 " Custom Key Mappings "
  """""""""""""""""""""
@@ -44,12 +49,13 @@ set autoindent                   " Enable autoindent
 set nosmartindent                " Don't mess with indentation
 filetype plugin indent on        " Use filetype based indentation
 
-" Tab Config "
+" Tab/Space Config "
  """"""""""""
 set nosmarttab                   " Don't Use smarttab
 set expandtab                    " Use spaces instead of tabs
 set shiftwidth=4                 " Set indent size
 set softtabstop=4                " Set <tab> input to 4 spaces
+autocmd BufWritePre * %s/\s\+$//e " Automatically strip trailing whitespace on save
 
 " Search Config "
  """""""""""""""
@@ -213,9 +219,12 @@ nnoremap <silent> <S-F4> :set autoindent! <bar> :set autoindent?<CR>
 "     <F5> - <F8>        "
  """"""""""""""""""""""""
 " Toggle line numbers / Bad Whitespace / Clear highlighting
+" Show invisible whitespace and trailing chars
 nnoremap <silent> <F5> :set number! <bar> set number?<CR>
-nnoremap <silent> <S-F5> :ToggleBadWhitespace<CR>
-nnoremap <silent> <C-F5> :set hls! <bar> set hls?<CR>
+nnoremap <silent> <C-F5> :call JumpToLine()<CR>
+nnoremap <silent> <S-F5> :set hls! <bar> set hls?<CR>
+nnoremap <silent> <F6> :set list! <bar> set list?<CR>
+nnoremap <silent> <S-F6> :ToggleBadWhitespace<CR>
 
 " Limelight Highlighting on/off
 nnoremap <silent> <F7> :Limelight<CR>
@@ -276,7 +285,7 @@ nnoremap <silent> <S-Left> <C-w><<C-w><
 " Other Shortcuts "
  """""""""""""""""
 " Removes trailing whitespace and clears 'empty' lines of spaces/tabs
-nnoremap <leader>w :let _s=@/<Bar>:%s/\s\+$//e<Bar>:let @/=_s<Bar>:nohl<CR>
+"nnoremap <leader>w :let _s=@/<Bar>:%s/\s\+$//e<Bar>:let @/=_s<Bar>:nohl<CR>
 
 " Quick buffer switch with Tab
 nnoremap <silent> <Tab> :bn<CR>
@@ -313,6 +322,20 @@ vnoremap <C-h> :call Get_visual_selection() <bar> :call Replace_visual_selection
 
 " Python Formatting "
  """""""""""""""""""
+" Optimized Python Settings
+augroup PythonSettings
+    autocmd!
+    autocmd FileType python setlocal
+        \ tabstop=4
+        \ softtabstop=4
+        \ shiftwidth=4
+        \ textwidth=79
+        \ expandtab
+        \ autoindent
+        \ fileformat=unix
+augroup END
+
+" Legacy python settings
 "au BufNewFile,BufRead *.py
 "    \ set tabstop=4 |
 "    \ set softtabstop=4 |
@@ -342,6 +365,15 @@ endfunction
 function! Replace_visual_selection()
   let change = input(':%s/'.g:vselection.'/: ')
   execute ':%s/'.g:vselection.'/'.change.'/g'
+endfunction
+
+function! JumpToLine()
+    let l:line = input('Jump to line: ')
+    if l:line =~ '^\d\+$'
+        execute l:line
+    else
+        echo " Invalid line number"
+    endif
 endfunction
 
 
