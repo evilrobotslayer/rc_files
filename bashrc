@@ -27,7 +27,7 @@ _init_security() {
         # 0020 is the bitmask for group-writable
         # 8#$mode forces Bash to interpret the variable as an octal number
         if [[ "$owner" != "0" ]] || (( (8#$perms & 0002) != 0 )); then
-            echo "${_CLR_B_YLW}Warning: Removing insecure path $path${_CLR_NC}" >&2
+            echo -e "\e[1;33mWarning: Removing insecure path \e[1;31m$path\e[0m" >&2
             unset "_BIN_SEARCH_PATHS[$i]"
         fi
     done
@@ -57,7 +57,7 @@ _init_security() {
         if [[ "$found" == false ]]; then
             for core in "${CMDS[@]}"; do
                 if [[ "$cmd" == "$core" ]]; then
-                    echo "${_CLR_B_RED}Error: Critical binary '$cmd' not found${_CLR_NC}" >&2
+                    echo -e "\e[1;31mError: Critical binary '\e[1;33m$cmd\e[1;31m' not found\e[0m" >&2
                 fi
             done
         fi
@@ -156,15 +156,15 @@ _define_prompt() {
     local G="$_CLR_B_GRN" B="$_CLR_B_BLU" C="$_CLR_B_CYN"
     local R="$_CLR_B_RED" W="$_CLR_NC" BOLD="$_CLR_BOLD"
 
-    # Check return/exit status
+    # Check return/exit status and wrap internal color codes in \[ \]
     if (( EXIT == 0 )); then
-        local STATUS="${C}[\j| \! ]${G}"
+        local STATUS="\[${C}\][\j| \! ]\[${G}\]"
     else
-        local STATUS="${R}[\j|\!|$EXIT]"
+        local STATUS="\[${R}\][\j|\!|$EXIT]"
     fi
 
-    # Build prompt
-    PS1="${debian_chroot:+($debian_chroot)}${G}\u@\h${B} \w ${BOLD}${STATUS} \$${W} "
+    # Build prompt with non-printing wrappers around all color variables
+    PS1="${debian_chroot:+($debian_chroot)}\[${G}\]\u@\h\[${B}\] \w \[${BOLD}\]${STATUS} \[${BOLD}\]\$\[${W}\] "
 }
 PROMPT_COMMAND=_define_prompt
 
