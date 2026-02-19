@@ -204,8 +204,7 @@ nnoremap <silent> <F1> :update<CR>
 nnoremap <silent> <S-F1> :vsplit <bar> view ~/.vimrc<CR>
 nnoremap <silent> <F2> :set readonly! <bar> :set readonly?<CR>
 nnoremap <silent> <F3> :setlocal ff=unix <bar> :update<CR>
-nnoremap <silent> <S-F3> :s/
-/\r/g<CR>
+nnoremap <silent> <S-F3> :s//\r/g<CR>
 set pastetoggle=<F4>
 nnoremap <silent> <S-F4> :set autoindent! <bar> :set autoindent?<CR>
 
